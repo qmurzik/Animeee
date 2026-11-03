@@ -24,3 +24,31 @@ jobs:
         with:
           name: AnimeApp-unsigned
           path: AnimeApp-unsigned.ipa
+  simulator:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pick an iPhone simulator
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, os
+          devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
+          candidates = [d for runtime, group in devices.items() if 'iOS' in runtime for d in group if 'iPhone' in d['name']]
+          selected = next((d for d in candidates if d['name'] == 'iPhone 16'), candidates[0])
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write('SIMULATOR_ID=' + selected['udid'] + '\n')
+          PY
+      - name: Build and launch on simulator
+        run: |
+          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild CODE_SIGNING_ALLOWED=NO build
+          xcrun simctl boot "$SIMULATOR_ID" || true
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl ui "$SIMULATOR_ID" appearance dark
+          xcrun simctl install "$SIMULATOR_ID" simbuild/Build/Products/Debug-iphonesimulator/AnimeApp.app
+          xcrun simctl launch "$SIMULATOR_ID" com.animeapp.viewer
+          sleep 15
+          xcrun simctl io "$SIMULATOR_ID" screenshot home.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: simulator-home
+          path: home.png

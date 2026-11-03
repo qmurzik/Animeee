@@ -34,6 +34,27 @@ class ProviderContract(unittest.TestCase):
         self.assertTrue(playable_pages)
         self.assertTrue(any((x.get('data') or {}).get('dubbing') for x in playable_pages))
 
+    def test_aksor_dash_manifest(self):
+        from urllib.parse import quote
+        import xml.etree.ElementTree as ET
+        payload = self.get('https://player.aksor.tv/api/video/8d4b9ff83b37b94e542c49fa3a8d2286')
+        address = next(x for x in payload['qualities'].values() if x)
+        with urlopen(quote(address, safe=':/?=&%'), timeout=20) as response:
+            manifest = response.read()
+        root = ET.fromstring(manifest)
+        self.assertTrue(root.tag.endswith('MPD'))
+        self.assertNotIn(b'ContentProtection', manifest)
+
+    def test_cvh_exact_studio_and_mp4(self):
+        playlist = self.get('https://plapi.cdnvideohub.com/api/v1/player/sv/playlist?pub=745&id=51404&aggr=mali')
+        matches = [x for x in playlist['items'] if x.get('voiceStudio') == 'FumoDub']
+        self.assertEqual(len(matches), 1)
+        payload = self.get('https://plapi.cdnvideohub.com/api/v1/player/sv/video/' + matches[0]['vkId'])
+        address = payload['sources']['mpegMediumUrl']
+        with urlopen(Request(address, headers={'Range': 'bytes=0-1023'}), timeout=20) as response:
+            self.assertIn(response.status, (200, 206))
+            self.assertTrue(response.read(64))
+
     def test_aniskip(self):
         result = self.get('https://api.aniskip.com/v2/skip-times/1735/1?types=op&types=ed&episodeLength=0')
         self.assertTrue(result['found'])
