@@ -118,7 +118,30 @@ struct SearchView: View {
     @State private var query = ""
     @State private var items: [Anime] = []
     @State private var error: String?
-    var body: some View { NavigationStack { List { if let error { Text(error) }; ForEach(items) { item in NavigationLink { DetailView(id: item.id) } label: { PosterView(anime: item) } } }.navigationTitle("Поиск").searchable(text: $query, prompt: "Название аниме").task(id: query) { guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { items = []; return }; do { try await Task.sleep(for: .milliseconds(400)); let found = try await Libria().search(query); guard !Task.isCancelled else { return }; items = found; error = nil } catch is CancellationError {} catch { self.error = error.localizedDescription } } } }
+    @State private var loading = false
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentUnavailableView("Найди свою историю", systemImage: "sparkle.magnifyingglass", description: Text("Ищи по русскому или оригинальному названию"))
+                } else {
+                    if loading { ProgressView().padding() }
+                    if let error { Text(error).foregroundStyle(.secondary).padding() }
+                    if !loading && items.isEmpty && error == nil { ContentUnavailableView.search(text: query) }
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .center, spacing: 20) {
+                        ForEach(items) { item in NavigationLink { DetailView(id: item.id) } label: { CoverCard(anime: item) }.buttonStyle(.plain) }
+                    }.padding()
+                }
+            }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).navigationTitle("Поиск")
+             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название аниме")
+             .task(id: query) {
+                 guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { items = []; loading = false; error = nil; return }
+                 loading = true
+                 do { try await Task.sleep(for: .milliseconds(400)); let found = try await Libria().search(query); guard !Task.isCancelled else { return }; items = found; error = nil; loading = false }
+                 catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription; loading = false }
+             }
+        }
+    }
 }
 struct DetailView: View {
     let id: Int
@@ -234,10 +257,12 @@ struct YaniSourcesView: View {
             if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let video = videos.first(where: { "yani-\($0.id)" == last.episodeID && $0.supportsNativePlayback }) {
                 NavigationLink { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: videos.filter { $0.supportsNativePlayback }) } label: { Label("Продолжить · \(video.voiceName) · серия \(video.number ?? "—")", systemImage: "play.fill").font(.subheadline.bold()).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
             }
+            DisclosureGroup("Выбрать озвучку · \(groups.count)") {
             ForEach(groups, id: \.key) { group in
                 NavigationLink {
                     YaniEpisodesView(anime: anime, name: group.key, videos: videos.filter { $0.supportsNativePlayback })
                 } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) серий · выбрать озвучку").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
+            }
             }
         }.task { if !loaded && !loading { await load() } }
     }
