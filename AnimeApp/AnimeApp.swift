@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import UniformTypeIdentifiers
 
 struct Anime: Codable, Identifiable {
     struct Name: Codable { let main: String; let english: String? }
@@ -53,7 +54,7 @@ struct RootView: View {
         TabView {
             CatalogView().tabItem { Label("Главная", systemImage: "sparkles.tv") }
             SearchView().tabItem { Label("Поиск", systemImage: "magnifyingglass") }
-            LibraryView().tabItem { Label("История", systemImage: "clock") }
+            LibraryView().tabItem { Label("Библиотека", systemImage: "books.vertical") }
             SettingsView().tabItem { Label("Настройки", systemImage: "gearshape") }
         }
     }
@@ -83,6 +84,7 @@ struct DetailView: View {
     @State private var error: String?
     var body: some View { ScrollView { if let anime { VStack(alignment: .leading, spacing: 18) {
         HStack(alignment: .top) { AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(width: 130, height: 190).clipped().cornerRadius(14); VStack(alignment: .leading, spacing: 10) { Text(anime.name.main).font(.title2.bold()); Text(anime.name.english ?? "").foregroundStyle(.secondary); Text("AniLibria · \(anime.episodes?.count ?? 0) серий").font(.caption).foregroundStyle(.purple) } }
+        LibraryControls(anime: anime)
         Text(anime.description ?? "Описание отсутствует").font(.body).foregroundStyle(.secondary)
         if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let episode = anime.episodes?.first(where: { $0.id == last.episodeID }) {
             NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Продолжить: серия \((episode.ordinal ?? 0).formatted())", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(.purple).foregroundStyle(.white).cornerRadius(12) }
@@ -262,15 +264,139 @@ struct SkipResponse: Decodable {
     }
     let results: [Entry]
 }
+enum WatchStatus: String, Codable, CaseIterable, Identifiable {
+    case watching = "Смотрю", planned = "В планах", completed = "Просмотрено", paused = "Отложено", dropped = "Брошено"
+    var id: String { rawValue }
+}
+struct LibraryEntry: Codable, Identifiable {
+    let id: Int
+    let title: String
+    let imageURL: URL?
+    var status: WatchStatus?
+    var favorite: Bool
+}
+enum LocalLibrary {
+    static let key = "localLibrary.v1"
+    static func decode(_ data: Data) -> [LibraryEntry] { (try? JSONDecoder().decode([LibraryEntry].self, from: data)) ?? [] }
+    static func encode(_ entries: [LibraryEntry]) -> Data { (try? JSONEncoder().encode(entries)) ?? Data() }
+}
+struct LibraryControls: View {
+    let anime: Anime
+    @AppStorage(LocalLibrary.key) private var data = Data()
+    var current: LibraryEntry { LocalLibrary.decode(data).first { $0.id == anime.id } ?? LibraryEntry(id: anime.id, title: anime.name.main, imageURL: anime.imageURL, status: nil, favorite: false) }
+    func update(_ entry: LibraryEntry) {
+        var items = LocalLibrary.decode(data).filter { $0.id != anime.id }
+        if entry.status != nil || entry.favorite { items.insert(entry, at: 0) }
+        data = LocalLibrary.encode(items)
+    }
+    var body: some View {
+        HStack {
+            Menu {
+                ForEach(WatchStatus.allCases) { status in Button(status.rawValue) { var entry = current; entry.status = status; update(entry) } }
+                if current.status != nil { Button("Убрать из списка", role: .destructive) { var entry = current; entry.status = nil; update(entry) } }
+            } label: { Label(current.status?.rawValue ?? "Добавить в библиотеку", systemImage: "bookmark") }
+            Spacer()
+            Button { var entry = current; entry.favorite.toggle(); update(entry) } label: { Label(current.favorite ? "В избранном" : "В избранное", systemImage: current.favorite ? "heart.fill" : "heart") }
+        }.font(.subheadline).buttonStyle(.bordered)
+    }
+}
 struct LibraryView: View {
-    @AppStorage(HistoryStore.storageKey) private var data = Data()
-    var entries: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: data)) ?? [] }
-    var body: some View { NavigationStack { List { if entries.isEmpty { Text("Здесь появятся просмотренные тайтлы.").foregroundStyle(.secondary) }; ForEach(entries) { entry in NavigationLink { DetailView(id: entry.id) } label: { VStack(alignment: .leading) { Text(entry.title); Text("Серия \((entry.episodeNumber ?? 0).formatted()) · \(Int(entry.seconds / 60)) мин.").font(.caption).foregroundStyle(.secondary) } } }.onDelete { offsets in var all = entries; all.remove(atOffsets: offsets); data = (try? JSONEncoder().encode(all)) ?? Data() } }.navigationTitle("История") } }
+    @AppStorage(HistoryStore.storageKey) private var historyData = Data()
+    @AppStorage(LocalLibrary.key) private var libraryData = Data()
+    @State private var selection = "История"
+    var history: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: historyData)) ?? [] }
+    var library: [LibraryEntry] { LocalLibrary.decode(libraryData) }
+    var visible: [LibraryEntry] { selection == "Избранное" ? library.filter(\.favorite) : library.filter { $0.status?.rawValue == selection } }
+    var body: some View {
+        NavigationStack {
+            List {
+                if selection == "История" {
+                    if history.isEmpty { Text("Просмотренные тайтлы появятся здесь.").foregroundStyle(.secondary) }
+                    ForEach(history) { entry in NavigationLink { DetailView(id: entry.id) } label: { VStack(alignment: .leading) { Text(entry.title); Text("Серия \((entry.episodeNumber ?? 0).formatted()) · \(Int(entry.seconds / 60)) мин.").font(.caption).foregroundStyle(.secondary) } } }
+                    .onDelete { offsets in var all = history; all.remove(atOffsets: offsets); historyData = (try? JSONEncoder().encode(all)) ?? Data() }
+                } else {
+                    if visible.isEmpty { Text("В этом разделе пока нет тайтлов.").foregroundStyle(.secondary) }
+                    ForEach(visible) { entry in NavigationLink { DetailView(id: entry.id) } label: {
+                        HStack { AsyncImage(url: entry.imageURL) { image in image.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(width: 54, height: 75).clipped().cornerRadius(8); Text(entry.title); Spacer(); if entry.favorite { Image(systemName: "heart.fill").foregroundStyle(.purple) } }
+                    } }
+                }
+            }.navigationTitle("Библиотека")
+             .toolbar { ToolbarItem(placement: .topBarTrailing) { Menu(selection) { Button("История") { selection = "История" }; Button("Избранное") { selection = "Избранное" }; ForEach(WatchStatus.allCases) { status in Button(status.rawValue) { selection = status.rawValue } } } } }
+        }
+    }
+}
+struct LibraryBackup: Codable {
+    let version: Int
+    let library: [LibraryEntry]
+    let history: [HistoryEntry]
+    let progress: [String: Double]
+    static func make() -> LibraryBackup {
+        let defaults = UserDefaults.standard
+        let progress = defaults.dictionaryRepresentation().reduce(into: [String: Double]()) { result, item in
+            if item.key.hasPrefix("progress."), let value = item.value as? Double, value.isFinite, value >= 0 { result[item.key] = value }
+        }
+        return LibraryBackup(version: 1, library: LocalLibrary.decode(defaults.data(forKey: LocalLibrary.key) ?? Data()), history: HistoryStore.load(), progress: progress)
+    }
+    func restore() throws {
+        guard version == 1, library.count <= 10000, history.count <= 10000, progress.count <= 100000,
+              Set(library.map(\.id)).count == library.count, Set(history.map(\.id)).count == history.count,
+              progress.allSatisfy({ $0.key.hasPrefix("progress.") && $0.key.count < 200 && $0.value.isFinite && $0.value >= 0 }) else { throw CocoaError(.fileReadCorruptFile) }
+        let libraryData = try JSONEncoder().encode(library)
+        let historyData = try JSONEncoder().encode(history)
+        let defaults = UserDefaults.standard
+        defaults.set(libraryData, forKey: LocalLibrary.key)
+        defaults.set(historyData, forKey: HistoryStore.storageKey)
+        // Restore replaces saved progress as well as the library and history.
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("progress.") { defaults.removeObject(forKey: key) }
+        for (key, value) in progress { defaults.set(value, forKey: key) }
+    }
+}
+struct BackupDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var backup: LibraryBackup
+    init(backup: LibraryBackup) { self.backup = backup }
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents, data.count <= 10_000_000 else { throw CocoaError(.fileReadCorruptFile) }
+        backup = try JSONDecoder().decode(LibraryBackup.self, from: data)
+    }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: try JSONEncoder().encode(backup)) }
 }
 
 struct SettingsView: View {
     @AppStorage("autoSkipOpening") private var opening = false
     @AppStorage("autoSkipEnding") private var ending = false
     @AppStorage("autoNext") private var autoNext = true
-    var body: some View { NavigationStack { Form { Section("Воспроизведение") { Toggle("Следующая серия автоматически", isOn: $autoNext) }; Section("Пропуск") { Toggle("Автоматически пропускать опенинг", isOn: $opening); Toggle("Автоматически пропускать эндинг", isOn: $ending); Text("Используются точные метки источника; данные AniSkip применяются только при совпадении длительности.").font(.footnote).foregroundStyle(.secondary) }; Section("Источник") { Text("AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) } }.navigationTitle("Настройки") } }
+    @State private var exporting = false
+    @State private var importing = false
+    @State private var exportDocument: BackupDocument?
+    @State private var message: String?
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Воспроизведение") { Toggle("Следующая серия автоматически", isOn: $autoNext) }
+                Section("Пропуск") { Toggle("Автоматически пропускать опенинг", isOn: $opening); Toggle("Автоматически пропускать эндинг", isOn: $ending); Text("Используются метки источника; данные AniSkip применяются только при близкой длительности. Различия монтажа всё равно возможны.").font(.footnote).foregroundStyle(.secondary) }
+                Section("Библиотека") {
+                    Button("Экспортировать JSON") { exportDocument = BackupDocument(backup: LibraryBackup.make()); exporting = true }
+                    Button("Импортировать JSON") { importing = true }
+                    Text("Импорт заменяет библиотеку, историю и сохранённые позиции.").font(.footnote).foregroundStyle(.secondary)
+                    if let message { Text(message).font(.footnote) }
+                }
+                Section("Источник") { Text("AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
+            }.navigationTitle("Настройки")
+            .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json, defaultFilename: "AnimeApp-backup") { result in
+                switch result { case .success: message = "Экспорт завершён."; case .failure(let error): message = "Ошибка экспорта: \(error.localizedDescription)" }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                do {
+                    let url = try result.get()
+                    let accessed = url.startAccessingSecurityScopedResource()
+                    defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                    let data = try Data(contentsOf: url)
+                    guard data.count <= 10_000_000 else { throw CocoaError(.fileReadCorruptFile) }
+                    let backup = try JSONDecoder().decode(LibraryBackup.self, from: data)
+                    try backup.restore(); message = "Импорт завершён."
+                } catch { message = "Ошибка импорта: \(error.localizedDescription)" }
+            }
+        }
+    }
 }
