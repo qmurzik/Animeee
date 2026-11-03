@@ -95,7 +95,9 @@ struct MirrorTransport {
                 guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
                 guard !(200..<300).contains(http.statusCode) else {
                     guard data.count <= 12_000_000 else { throw SourceFailure(message: "Ответ источника слишком большой") }
-                    return MirrorResponse(data: data, origin: origin)
+                    var actual = URLComponents(url: http.url ?? origin, resolvingAgainstBaseURL: false)
+                    actual?.path = ""; actual?.query = nil; actual?.fragment = nil
+                    return MirrorResponse(data: data, origin: actual?.url ?? origin)
                 }
                 let message = "\(origin.host ?? "Источник"): HTTP \(http.statusCode)"
                 // Authentication, access restrictions and rate limits are not mirror failures.
