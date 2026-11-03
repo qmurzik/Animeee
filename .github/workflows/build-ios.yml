@@ -76,14 +76,19 @@ jobs:
       - name: Check native video output on simulator
         run: |
           for source in aksor cvh; do
-            SIMCTL_CHILD_ANIMEAPP_PROBE="$source" xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
+            landscape=0
+            if test "$source" = cvh; then landscape=1; fi
+            SIMCTL_CHILD_ANIMEAPP_LANDSCAPE="$landscape" SIMCTL_CHILD_ANIMEAPP_PROBE="$source" xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
             detected=0
             for attempt in 1 2 3 4; do
               sleep 15
-              xcrun simctl spawn "$SIMULATOR_ID" log show --last 5m --style compact --predicate "eventMessage CONTAINS 'ANIMEAPP_FRAME_$source'" > "probe-$source.log"
-              if grep -q "ANIMEAPP_FRAME_$source seconds=" "probe-$source.log"; then detected=1; break; fi
+              xcrun simctl spawn "$SIMULATOR_ID" log show --last 5m --style compact --predicate "eventMessage CONTAINS 'ANIMEAPP_'" > "probe-$source.log"
+              if grep -q "ANIMEAPP_CONTROLS_$source passed" "probe-$source.log"; then detected=1; break; fi
             done
             xcrun simctl io "$SIMULATOR_ID" screenshot "player-$source.png"
+            if test "$source" = cvh; then
+              python3 -c 'import struct; w,h=struct.unpack(">II",open("player-cvh.png","rb").read()[16:24]); print("Landscape screenshot:",w,h); assert w > h'
+            fi
             cat "probe-$source.log"
             test "$detected" = 1
           done

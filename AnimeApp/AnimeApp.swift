@@ -673,6 +673,20 @@ struct AksorResolver {
             if !reportedFrame, seconds > 2, player.hasVideoOut, let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] {
                 reportedFrame = true
                 NSLog("ANIMEAPP_FRAME_%@ seconds=%.2f", probe, seconds)
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.player.pause()
+                    try? await Task.sleep(for: .seconds(1))
+                    let frozen = self.player.time.intValue
+                    try? await Task.sleep(for: .seconds(1))
+                    guard !self.player.isPlaying, abs(self.player.time.intValue - frozen) < 1000, self.player.isSeekable else { NSLog("ANIMEAPP_CONTROLS_%@ failed pause/seekability", probe); return }
+                    self.seek(15); self.toggle()
+                    for _ in 0..<10 {
+                        try? await Task.sleep(for: .seconds(1))
+                        if self.player.isPlaying && self.player.time.intValue >= 10000 { NSLog("ANIMEAPP_CONTROLS_%@ passed", probe); return }
+                    }
+                    NSLog("ANIMEAPP_CONTROLS_%@ failed resume/seek", probe)
+                }
             }
             #endif
             tickCount += 1; if tickCount % 10 == 0 && pendingSeek == nil { save() }
@@ -701,6 +715,7 @@ struct MultiSourcePlayerScreen: View {
     var body: some View {
         GeometryReader { geometry in
             let landscape = geometry.size.width > geometry.size.height
+            let windowInsets = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets ?? .zero
             ZStack {
                 Color.black
                 VLCSurface(player: model.player).ignoresSafeArea()
@@ -717,9 +732,9 @@ struct MultiSourcePlayerScreen: View {
                         Spacer()
                         timeline
                         actions
-                    }.padding(.horizontal, max(20, geometry.safeAreaInsets.leading + 12))
-                     .padding(.top, max(16, geometry.safeAreaInsets.top + 8))
-                     .padding(.bottom, max(16, geometry.safeAreaInsets.bottom + 8))
+                    }.padding(.horizontal, max(20, max(windowInsets.left, windowInsets.right) + 12))
+                     .padding(.top, max(16, max(geometry.safeAreaInsets.top, windowInsets.top) + 8))
+                     .padding(.bottom, max(16, max(geometry.safeAreaInsets.bottom, windowInsets.bottom) + 8))
                      .transition(.opacity)
                 }
                 if model.loading && model.error == nil { ProgressView("Подключаем видео…").tint(.white).foregroundStyle(.white).padding(18).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14)).allowsHitTesting(false) }
@@ -739,7 +754,12 @@ struct MultiSourcePlayerScreen: View {
         }.ignoresSafeArea().background(.black)
         .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar)
         .sheet(item: $panel) { selection in selectionSheet(selection) }
-        .task(id: controls) { guard controls else { return }; do { try await Task.sleep(for: .seconds(5)); if model.playing && panel == nil && scrub == nil && model.error == nil { withAnimation { controls = false } } } catch {} }
+        .statusBarHidden(true)
+        .task(id: controls) {
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] != nil { return }
+            #endif
+            guard controls else { return }; do { try await Task.sleep(for: .seconds(5)); if model.playing && panel == nil && scrub == nil && model.error == nil { withAnimation { controls = false } } } catch {} }
         .onChange(of: model.playing) { _, playing in if !playing { controls = true } }
         .onChange(of: panel) { _, value in if value != nil { controls = true } }
         .onAppear {
