@@ -809,6 +809,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Источник") { NavigationLink("Источники и зеркала") { SourcesSettingsView() }.accessibilityIdentifier("settings.sources"); NavigationLink("Каталоги Shikimori, AnimeLIB, AnimeGO") { SourceSearchView() }; NavigationLink("Аккаунт YummyAnime") { YaniAccountView() }; Text("Каталог: YummyAnime · видео: Aksor, CVH, AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
                 Section("Просмотр") {
                     Toggle("Следующая серия автоматически", isOn: $autoNext)
                     Toggle("Открывать плеер на весь экран", isOn: $landscape)
@@ -822,7 +823,6 @@ struct SettingsView: View {
                     Text("Импорт заменяет библиотеку, историю и сохранённые позиции.").font(.footnote).foregroundStyle(.secondary)
                     if let message { Text(message).font(.footnote) }
                 }
-                Section("Источник") { NavigationLink("Источники и зеркала") { SourcesSettingsView() }; NavigationLink("Каталоги Shikimori, AnimeLIB, AnimeGO") { SourceSearchView() }; NavigationLink("Аккаунт YummyAnime") { YaniAccountView() }; Text("Каталог: YummyAnime · видео: Aksor, CVH, AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
             }.navigationTitle("Настройки")
             .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json, defaultFilename: "AnimeApp-backup") { result in
                 switch result { case .success: message = "Экспорт завершён."; case .failure(let error): message = "Ошибка экспорта: \(error.localizedDescription)" }

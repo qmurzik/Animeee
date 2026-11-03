@@ -169,7 +169,7 @@ struct SourceDetailView: View {
     }
 }
 struct SourcesSettingsView: View {
-    var body: some View { List { ForEach(CatalogSource.allCases) { source in NavigationLink { SourceSettingsView(source: source) } label: { VStack(alignment: .leading, spacing: 7) { Text(source.title).font(.headline); Text(source.note).font(.caption).foregroundStyle(.secondary) } } } }.navigationTitle("Источники и зеркала") }
+    var body: some View { List { ForEach(CatalogSource.allCases) { source in NavigationLink { SourceSettingsView(source: source) } label: { VStack(alignment: .leading, spacing: 7) { Text(source.title).font(.headline); Text(source.note).font(.caption).foregroundStyle(.secondary) } }.accessibilityIdentifier("source.config." + source.rawValue) } }.navigationTitle("Источники и зеркала") }
 }
 struct SourceSettingsView: View {
     let source: CatalogSource
@@ -177,21 +177,25 @@ struct SourceSettingsView: View {
     @State private var api = ""
     @State private var message: String?
     @State private var checking = false
+    private enum Field: Hashable { case site, api }
+    @FocusState private var focusedField: Field?
     var body: some View {
         Form {
             Section(source.title) { Text(source.note).font(.footnote); ForEach(source.sites, id: \.self) { Text($0).font(.caption).textSelection(.enabled) } }
-            Section("Свой адрес сайта") { TextField(source.sites[0], text: $site).accessibilityIdentifier("mirror.site").textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL); Text("Только HTTPS-адрес без пути. Используйте зеркало, опубликованное самим сервисом. Пустое поле возвращает стандартный адрес.").font(.footnote).foregroundStyle(.secondary) }
-            Section("Адрес API") { TextField(source.api, text: $api).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL); Text("API и сайт настраиваются отдельно. CDN и адреса видео не переписываются. Ключи и токены YummyAnime сюда не отправляются.").font(.footnote).foregroundStyle(.secondary) }
+            if let message { Section { Text(message).font(.footnote).textSelection(.enabled) } }
+            Section("Свой адрес сайта") { TextField(source.sites[0], text: $site).focused($focusedField, equals: .site).accessibilityIdentifier("mirror.site").textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL); Text("Только HTTPS-адрес без пути. Используйте зеркало, опубликованное самим сервисом. Пустое поле возвращает стандартный адрес.").font(.footnote).foregroundStyle(.secondary) }
+            Section("Адрес API") { TextField(source.api, text: $api).focused($focusedField, equals: .api).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL); Text("API и сайт настраиваются отдельно. CDN и адреса видео не переписываются. Ключи и токены YummyAnime сюда не отправляются.").font(.footnote).foregroundStyle(.secondary) }
             Section {
-                Button("Сохранить") { save() }.accessibilityIdentifier("mirror.save")
                 Button("Проверить каталог") { Task { await check() } }.disabled(checking)
                 if checking { ProgressView() }
-                if let message { Text(message).font(.footnote).textSelection(.enabled) }
             }
             Section("Переключение") { Text("При сетевой ошибке или HTTP 5xx запрос переходит к следующему настроенному адресу API. Ошибки доступа 401/403 и лимит 429 останавливают переключение. Страницы плееров не заменяются зеркалами автоматически; выбранный сайт используется при открытии.").font(.footnote) }
-        }.navigationTitle(source.title).onAppear { site = UserDefaults.standard.string(forKey: "source.site." + source.rawValue) ?? ""; api = SourceConfiguration.api(source) ?? "" }
+        }.navigationTitle(source.title)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Сохранить") { save() }.accessibilityIdentifier("mirror.save") } }
+        .onAppear { site = UserDefaults.standard.string(forKey: "source.site." + source.rawValue) ?? ""; api = SourceConfiguration.api(source) ?? "" }
     }
     @discardableResult private func save() -> Bool {
+        focusedField = nil
         guard (site.isEmpty || MirrorAddress.parse(site) != nil), (api.isEmpty || MirrorAddress.parse(api) != nil) else { message = "Нужен HTTPS-домен без пути, параметров, логина и пароля."; return false }
         UserDefaults.standard.set(site, forKey: "source.site." + source.rawValue); UserDefaults.standard.set(api, forKey: "source.api." + source.rawValue); UserDefaults.standard.set(UUID().uuidString, forKey: "source.revision"); message = "Адреса сохранены."; return true
     }

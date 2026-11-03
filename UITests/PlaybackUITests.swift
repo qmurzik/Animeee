@@ -82,9 +82,9 @@ final class SourceSettingsUITests: XCTestCase {
         XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication(); app.launch()
         app.tabBars.buttons["Настройки"].tap()
-        let sources = app.buttons["Источники и зеркала"]
+        let sources = app.buttons["settings.sources"]
         XCTAssertTrue(sources.waitForExistence(timeout: 15)); sources.tap()
-        let animego = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "AnimeGO")).firstMatch
+        let animego = app.buttons["source.config.animego"]
         XCTAssertTrue(animego.waitForExistence(timeout: 10)); animego.tap()
         let field = app.textFields["mirror.site"]
         XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("http://invalid.example")
