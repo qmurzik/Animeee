@@ -232,7 +232,7 @@ struct YaniSourcesView: View {
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
             ForEach(groups, id: \.key) { group in
                 NavigationLink {
-                    YaniEpisodesView(name: group.key, videos: videos.filter { $0.groupKey == group.key })
+                    YaniEpisodesView(anime: anime, name: group.key, videos: videos.filter { $0.groupKey == group.key })
                 } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) записей серий").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
             }
         }
@@ -245,6 +245,7 @@ struct YaniSourcesView: View {
     }
 }
 struct YaniEpisodesView: View {
+    let anime: Anime
     let name: String
     let videos: [YaniVideo]
     @AppStorage("preferredYaniVoice") private var preferred = ""
@@ -254,7 +255,7 @@ struct YaniEpisodesView: View {
             Section { Button(preferred == name ? "Убрать из предпочтений" : "Предпочитать эту озвучку и плеер") { preferred = preferred == name ? "" : name } }
             Section("Серии") {
                 ForEach(sorted) { video in
-                    if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { AksorNativeScreen(video: video) } }
+                    if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { AksorNativeScreen(sourceAnime: anime, video: video) } }
                 }
             }
         }.navigationTitle(name).navigationBarTitleDisplayMode(.inline)
@@ -262,6 +263,7 @@ struct YaniEpisodesView: View {
 }
 struct AksorResponse: Decodable { let qualities: [String: String?] }
 struct AksorNativeScreen: View {
+    let sourceAnime: Anime
     let video: YaniVideo
     @State private var anime: Anime?
     @State private var episode: Episode?
@@ -290,8 +292,8 @@ struct AksorNativeScreen: View {
             let q480 = compatible("q480"), q720 = compatible("q720"), q1080 = compatible("q1080")
             guard q480 != nil || q720 != nil || q1080 != nil else { error = "Aksor вернул MPEG-DASH или другой формат, который встроенный AVPlayer не поддерживает. Выберите AniLibria."; return }
             let item = Episode(id: "yani-\(video.id)", ordinal: Double(video.number ?? ""), name: nil, opening: nil, ending: nil, duration: nil, hls_480: q480, hls_720: q720, hls_1080: q1080)
-            // Keep the YummyAnime video identity separate from AniLibria IDs.
-            anime = Anime(id: -video.id, mal: nil, name: Anime.Name(main: video.voiceName, english: video.playerName), poster: nil, description: nil, year: nil, episodes: [item]); episode = item
+            // Keep the video progress identifier separate from AniLibria episode identifiers.
+            anime = Anime(id: sourceAnime.id, mal: sourceAnime.mal, name: sourceAnime.name, poster: sourceAnime.poster, description: sourceAnime.description, year: sourceAnime.year, episodes: [item]); episode = item
         } catch { self.error = "Aksor: \(error.localizedDescription)" }
     }
 }
