@@ -428,7 +428,7 @@ struct AksorResolver {
             guard let xml = String(data: data, encoding: .utf8), xml.contains("<MPD"), !xml.contains("ContentProtection") else { throw URLError(.cannotDecodeContentData) }
         }
         guard !Task.isCancelled else { return }
-        player.stop(); quality = stream.label; pendingSeek = position
+        player.stop(); quality = stream.label; pendingSeek = position > 0 ? position : nil
         let media = VLCMedia(url: stream.url)
         media.addOption(":network-caching=1500")
         player.media = media; player.play(); player.rate = rate
