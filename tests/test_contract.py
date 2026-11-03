@@ -23,6 +23,17 @@ class ProviderContract(unittest.TestCase):
             self.assertEqual(response.status, 200)
             self.assertTrue(response.read(256).startswith(b'#EXTM3U'))
 
+    def test_yummyanime_matching_and_voices(self):
+        from urllib.parse import urlencode
+        query = urlencode({'q': 'Наруто Ураганные хроники', 'limit': 50})
+        results = self.get('https://api.yani.tv/anime?' + query)['response']
+        matches = [x for x in results if (x.get('remote_ids') or {}).get('myanimelist_id') == 1735]
+        self.assertEqual(len(matches), 1)
+        videos = self.get('https://api.yani.tv/anime/' + str(matches[0]['anime_id']) + '/videos')['response']
+        playable_pages = [x for x in videos if isinstance(x.get('iframe_url'), str) and x['iframe_url'].startswith(('https://', '//'))]
+        self.assertTrue(playable_pages)
+        self.assertTrue(any((x.get('data') or {}).get('dubbing') for x in playable_pages))
+
     def test_aniskip(self):
         result = self.get('https://api.aniskip.com/v2/skip-times/1735/1?types=op&types=ed&episodeLength=0')
         self.assertTrue(result['found'])
