@@ -20,29 +20,36 @@ struct SourceSearchView: View {
     @State private var error: String?
     @State private var revision = 0
     @AppStorage("source.revision") private var configurationRevision = ""
+    private var searchTaskID: String { [source.rawValue, query, String(revision), configurationRevision].joined(separator: "|") }
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                Picker("Источник", selection: $source) { ForEach(CatalogSource.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
-                Text(source.note).font(.footnote).foregroundStyle(Cinema.muted)
-                if loading { ProgressView("Загружаем каталог…").frame(maxWidth: .infinity).padding() }
-                if let error { VStack(alignment: .leading, spacing: 12) { Label(error, systemImage: "exclamationmark.icloud"); Button("Повторить") { revision += 1 }; NavigationLink("Адреса и зеркала") { SourceSettingsView(source: source) } }.font(.subheadline).padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }
-                if !loading && error == nil && !query.isEmpty && items.isEmpty { ContentUnavailableView.search(text: query) }
-                if query.isEmpty { Text("Введите название в поиске. Каталоги независимы: совпадение названия не считается совпадением тайтла.").foregroundStyle(Cinema.muted) }
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-                    ForEach(items) { title in NavigationLink { SourceDetailView(title: title) } label: {
-                        VStack(alignment: .leading, spacing: 9) {
-                            Artwork(url: title.poster).aspectRatio(0.69, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 17))
-                            Text(title.title).font(.subheadline.bold()).lineLimit(2, reservesSpace: true).foregroundStyle(.white)
-                            Text(title.source.title).font(.caption).foregroundStyle(Cinema.muted)
-                        }
-                    }.buttonStyle(.plain) }
-                }
-            }.padding(20)
-        }.background(Cinema.background).navigationTitle("Другие источники")
-        .searchable(text: $query, prompt: "Название аниме")
-        .toolbar { NavigationLink { SourcesSettingsView() } label: { Image(systemName: "network") }.accessibilityLabel("Зеркала источников") }
-        .task(id: source.rawValue + "|" + query + "|" + String(revision) + configurationRevision) { await search() }
+        ScrollView { content.padding(20) }
+            .background(Cinema.background).navigationTitle("Другие источники")
+            .searchable(text: $query, prompt: "Название аниме")
+            .toolbar { NavigationLink { SourcesSettingsView() } label: { Image(systemName: "network") }.accessibilityLabel("Зеркала источников") }
+            .task(id: searchTaskID) { await search() }
+    }
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Picker("Источник", selection: $source) { ForEach(CatalogSource.allCases) { Text($0.title).tag($0) } }.pickerStyle(.segmented)
+            Text(source.note).font(.footnote).foregroundStyle(Cinema.muted)
+            if loading { ProgressView("Загружаем каталог…").frame(maxWidth: .infinity).padding() }
+            if let error { errorMessage(error) }
+            if !loading && error == nil && !query.isEmpty && items.isEmpty { ContentUnavailableView.search(text: query) }
+            if query.isEmpty { Text("Введите название в поиске. Каталоги независимы: совпадение названия не считается совпадением тайтла.").foregroundStyle(Cinema.muted) }
+            results
+        }
+    }
+    private func errorMessage(_ message: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(message, systemImage: "exclamationmark.icloud")
+            Button("Повторить") { revision += 1 }
+            NavigationLink("Адреса и зеркала") { SourceSettingsView(source: source) }
+        }.font(.subheadline).padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16))
+    }
+    private var results: some View {
+        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
+            ForEach(items) { title in NavigationLink { SourceDetailView(title: title) } label: { SourceCoverCard(title: title) }.buttonStyle(.plain) }
+        }
     }
     private func search() async {
         items = []; error = nil; loading = false
@@ -54,6 +61,16 @@ struct SourceSearchView: View {
             let result = try await SourceConfiguration.catalog(source).search(text)
             try Task.checkCancellation(); items = result; loading = false
         } catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription; loading = false }
+    }
+}
+struct SourceCoverCard: View {
+    let title: SourceTitle
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Artwork(url: title.poster).aspectRatio(0.69, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 17))
+            Text(title.title).font(.subheadline.bold()).lineLimit(2, reservesSpace: true).foregroundStyle(.white)
+            Text(title.source.title).font(.caption).foregroundStyle(Cinema.muted)
+        }
     }
 }
 struct SourceDetailView: View {
@@ -209,7 +226,7 @@ struct SourceWebView: UIViewRepresentable {
         let config = WKWebViewConfiguration(); config.allowsInlineMediaPlayback = true; config.allowsPictureInPictureMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = .all
         // Official website login stays in WebKit's own store. No token/cookie extraction.
-        config.websiteDataStore = .default
+        config.websiteDataStore = .default()
         let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = context.coordinator
         var req = URLRequest(url: request.url); if let referer = request.referer { req.setValue(referer.absoluteString, forHTTPHeaderField: "Referer") }
         view.load(req); return view
@@ -221,6 +238,11 @@ struct SourceWebView: UIViewRepresentable {
         init(failure: Binding<String?>) { _failure = failure }
         func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { if (error as NSError).code != NSURLErrorCancelled { failure = error.localizedDescription } }
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { if (error as NSError).code != NSURLErrorCancelled { failure = error.localizedDescription } }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse, http.statusCode >= 400 {
+                failure = "Плеер источника: HTTP \(http.statusCode)"; decisionHandler(.cancel)
+            } else { decisionHandler(.allow) }
+        }
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             guard let url = navigationAction.request.url else { decisionHandler(.cancel); return }
             decisionHandler(["https", "about", "blob"].contains(url.scheme ?? "") && navigationAction.targetFrame != nil ? .allow : .cancel)
