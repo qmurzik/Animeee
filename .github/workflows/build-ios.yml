@@ -13,6 +13,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Unit tests for episode selection and scrubbing
+        run: swift test
       - run: xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CURRENT_PROJECT_VERSION=${{ github.run_number }} CODE_SIGNING_ALLOWED=NO build
       - name: Package and validate
         run: |
@@ -53,7 +55,15 @@ jobs:
           import json, subprocess, os
           devices = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'devices', 'available', '-j']))['devices']
           candidates = [d for runtime, group in devices.items() if 'iOS' in runtime for d in group if 'iPhone' in d['name']]
-          selected = next((d for d in candidates if d['name'] == 'iPhone 16'), candidates[0])
+          runtimes = json.loads(subprocess.check_output(['xcrun', 'simctl', 'list', 'runtimes', '-j']))['runtimes']
+          ios18 = next((r['identifier'] for r in runtimes if r.get('isAvailable') and r['name'].startswith('iOS 18')), None)
+          if ios18:
+              udid = subprocess.check_output(['xcrun', 'simctl', 'create', 'AnimeApp iPhone XS', 'com.apple.CoreSimulator.SimDeviceType.iPhone-XS', ios18], text=True).strip()
+              selected = {'udid': udid}
+              print('Testing iPhone XS on', ios18)
+          else:
+              selected = next((d for d in candidates if d['name'] == 'iPhone 16'), candidates[0])
+              print('iOS 18 runtime unavailable; testing', selected['name'])
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write('SIMULATOR_ID=' + selected['udid'] + '\n')
           PY
@@ -73,6 +83,9 @@ jobs:
           test "$launched" = 1
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot home.png
+          SIMCTL_CHILD_ANIMEAPP_SCREEN=detail xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
+          sleep 15
+          xcrun simctl io "$SIMULATOR_ID" screenshot detail.png
       - name: Check native video output on simulator
         run: |
           for source in aksor cvh; do
@@ -100,6 +113,7 @@ jobs:
           name: simulator-home
           path: |
             home.png
+            detail.png
             player-*.png
             probe-*.log
       - name: Collect simulator diagnostics
@@ -123,7 +137,7 @@ jobs:
         run: |
           tag="build-${{ github.run_number }}"
           for attempt in 1 2 3; do gh release view "$tag" >/dev/null 2>&1 && break; sleep 10; done
-          for artifact in home.png player-*.png probe-*.log; do
+          for artifact in home.png detail.png player-*.png probe-*.log; do
             if test -f "$artifact"; then gh release upload "$tag" "$artifact" --clobber; fi
           done
           if test -d diagnostics; then tar -czf simulator-diagnostics.tgz diagnostics; gh release upload "$tag" simulator-diagnostics.tgz --clobber; fi

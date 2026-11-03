@@ -50,14 +50,14 @@ struct Libria: AnimeProvider {
     func release(_ id: Int) async throws -> Anime { try await fetch("anime/releases/\(id)") }
 }
 @main struct AnimeApp: App {
-    var body: some Scene { WindowGroup { AppRoute().preferredColorScheme(.dark).tint(.purple).task { _ = try? await YaniAPI.restore() } } }
+    var body: some Scene { WindowGroup { AppRoute().preferredColorScheme(.dark).tint(Cinema.accent).task { _ = try? await YaniAPI.restore() } } }
 }
 struct AppRoute: View {
     var body: some View {
         #if DEBUG
         if let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"], ["aksor", "cvh"].contains(probe) {
             PlaybackProbeView(mode: probe)
-        } else { RootView() }
+        } else if ProcessInfo.processInfo.environment["ANIMEAPP_SCREEN"] == "detail" { NavigationStack { DetailView(id: -111) } } else { RootView() }
         #else
         RootView()
         #endif
@@ -268,141 +268,6 @@ struct YaniSiteLogin: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) { decisionHandler(navigationAction.request.url?.scheme == "https" || navigationAction.request.url?.scheme == "about" ? .allow : .cancel) }
     }
 }
-struct RootView: View {
-    var body: some View {
-        TabView {
-            CatalogView().tabItem { Label("Главная", systemImage: "sparkles.tv") }
-            SearchView().tabItem { Label("Поиск", systemImage: "magnifyingglass") }
-            LibraryView().tabItem { Label("Библиотека", systemImage: "books.vertical") }
-            SettingsView().tabItem { Label("Настройки", systemImage: "gearshape") }
-        }
-    }
-}
-struct PosterView: View {
-    let anime: Anime
-    var body: some View { HStack(spacing: 14) {
-        AsyncImage(url: anime.imageURL) { image in image.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(width: 72, height: 100).clipped().cornerRadius(10)
-        VStack(alignment: .leading, spacing: 7) { Text(anime.name.main).font(.headline); Text(anime.name.english ?? "").font(.subheadline).foregroundStyle(.secondary).lineLimit(2); if let year = anime.year { Text(String(year)).font(.caption).foregroundStyle(.purple) } }
-    }.padding(.vertical, 3) }
-}
-struct CoverCard: View {
-    let anime: Anime
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(.white.opacity(0.06)).overlay { Image(systemName: "sparkles.tv").foregroundStyle(.white.opacity(0.3)) } }
-                .frame(width: 140, height: 200).clipped().clipShape(RoundedRectangle(cornerRadius: 14))
-            Text(anime.name.main).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(width: 140, alignment: .leading)
-            if let year = anime.year { Text(String(year)).font(.caption).foregroundStyle(.secondary) }
-        }.frame(width: 140, alignment: .topLeading)
-    }
-}
-struct CatalogView: View {
-    @State private var offset = 0
-    @State private var more = true
-    @State private var fetchingMore = false
-    @AppStorage("yaniRevision") private var sessionRevision = ""
-    @State private var items: [Anime] = []
-    @State private var error: String?
-    @AppStorage(HistoryStore.storageKey) private var historyData = Data()
-    var history: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: historyData)) ?? [] }
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    HStack(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 4) { Text("ANIME / APP").font(.caption.weight(.bold)).tracking(2).foregroundStyle(.purple); Text("Сегодня в кадре").font(.title2.bold()) }
-                        Spacer(); NavigationLink { YaniAccountView() } label: { Image(systemName: "person.crop.circle").font(.title2).foregroundStyle(.purple) }
-                    }.padding(.horizontal)
-                    if let last = history.first {
-                        NavigationLink { DetailView(id: last.id) } label: {
-                            HStack(spacing: 14) { Image(systemName: "play.fill").font(.title3).frame(width: 46, height: 46).background(.purple, in: RoundedRectangle(cornerRadius: 14)); VStack(alignment: .leading, spacing: 4) { Text("ПРОДОЛЖИТЬ").font(.caption2.bold()).tracking(1).foregroundStyle(.purple); Text(last.title).font(.headline).lineLimit(1); Text("Серия \((last.episodeNumber ?? 0).formatted()) · \(Int(last.seconds / 60)) мин").font(.caption).foregroundStyle(.secondary) }; Spacer(); Image(systemName: "chevron.right").font(.caption.bold()).foregroundStyle(.secondary) }.padding(16).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 18)).padding(.horizontal)
-                        }.buttonStyle(.plain)
-                    }
-                    if let error { Text(error).font(.footnote).foregroundStyle(.secondary).padding(.horizontal); Button("Повторить") { Task { await load() } }.padding(.horizontal) }
-                    if items.isEmpty && error == nil { ProgressView().frame(maxWidth: .infinity).padding() }
-                    if !items.isEmpty {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack { VStack(alignment: .leading, spacing: 3) { Text("Открывайте аниме").font(.title2.bold()); Text("Каталог YummyAnime").font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(.horizontal)
-                            ScrollView(.horizontal, showsIndicators: false) { LazyHStack(alignment: .top, spacing: 12) { ForEach(Array(items.prefix(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) } }.padding(.horizontal) }
-                        }
-                        Text("Ещё в каталоге").font(.title2.bold()).padding(.horizontal)
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .center, spacing: 18) {
-                            ForEach(Array(items.dropFirst(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) }
-                        }.padding(.horizontal)
-                        if more { Button(fetchingMore ? "Загрузка…" : "Загрузить ещё") { Task { await loadMore() } }.disabled(fetchingMore).buttonStyle(.bordered).frame(maxWidth: .infinity) }
-                    }
-                }.padding(.top, 12).padding(.bottom, 30)
-            }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.hidden, for: .navigationBar).task(id: sessionRevision) { await load() }.refreshable { await load() }
-        }
-    }
-    func loadMore() async { fetchingMore = true; defer { fetchingMore = false }; do { let page = try await YaniAPI.catalog(offset: offset); offset += page.count; more = page.count == 30; let ids = Set(items.map(\.id)); items.append(contentsOf: page.filter { !ids.contains($0.id) }); error = nil } catch { self.error = error.localizedDescription } }
-    func load() async { do { items = try await YaniAPI.catalog(); offset = items.count; more = items.count == 30; error = nil } catch { self.error = "Не удалось загрузить каталог: \(error.localizedDescription)" } }
-}
-struct SearchView: View {
-    @State private var query = ""
-    @State private var items: [Anime] = []
-    @State private var error: String?
-    @State private var loading = false
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                if query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    ContentUnavailableView("Найди свою историю", systemImage: "sparkle.magnifyingglass", description: Text("Ищи по русскому или оригинальному названию"))
-                } else {
-                    if loading { ProgressView().padding() }
-                    if let error { Text(error).foregroundStyle(.secondary).padding() }
-                    if !loading && items.isEmpty && error == nil { ContentUnavailableView.search(text: query) }
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .center, spacing: 20) {
-                        ForEach(items) { item in NavigationLink { DetailView(id: item.id) } label: { CoverCard(anime: item) }.buttonStyle(.plain) }
-                    }.padding()
-                }
-            }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).navigationTitle("Поиск")
-             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название аниме")
-             .task(id: query) {
-                 guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { items = []; loading = false; error = nil; return }
-                 loading = true
-                 do { try await Task.sleep(for: .milliseconds(400)); let found = try await YaniAPI.catalog(query: query); guard !Task.isCancelled else { return }; items = found; error = nil; loading = false }
-                 catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription; loading = false }
-             }
-        }
-    }
-}
-struct DetailView: View {
-    let id: Int
-    @State private var anime: Anime?
-    @State private var error: String?
-    @AppStorage(HistoryStore.storageKey) private var historyData = Data()
-    var history: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: historyData)) ?? [] }
-    var body: some View {
-        ScrollView {
-            if let anime {
-                VStack(alignment: .leading, spacing: 20) {
-                    ZStack(alignment: .bottomLeading) {
-                        AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(maxWidth: .infinity).frame(height: 330).clipped()
-                        LinearGradient(colors: [.clear, .black.opacity(0.35), Color(red: 0.045, green: 0.04, blue: 0.075)], startPoint: .top, endPoint: .bottom)
-                        VStack(alignment: .leading, spacing: 6) { Text(anime.id < 0 ? "YUMMYANIME" : "ANILIBRIA").font(.caption.bold()).tracking(2).foregroundStyle(.purple); Text(anime.name.main).font(.largeTitle.bold()).lineLimit(3); if let year = anime.year { Text(anime.id < 0 ? "\(String(year))  •  YummyAnime" : "\(String(year))  •  \(anime.episodes?.count ?? 0) серий").font(.subheadline).foregroundStyle(.secondary) } }.padding(20)
-                    }.frame(height: 330).clipped()
-                    VStack(alignment: .leading, spacing: 20) {
-                        if let last = history.first(where: { $0.id == anime.id }), let episode = anime.episodes?.first(where: { $0.id == last.episodeID }) {
-                            NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Продолжить · серия \((episode.ordinal ?? 0).formatted())", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
-                        } else if let episode = anime.episodes?.first(where: { !$0.streams.isEmpty }) {
-                            NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Смотреть", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
-                        }
-                        LibraryControls(anime: anime)
-                        Text(anime.description ?? "Описание отсутствует").font(.subheadline).foregroundStyle(.secondary)
-                        YaniSourcesView(anime: anime)
-                        if !(anime.episodes ?? []).isEmpty { HStack { Text("Серии").font(.title2.bold()); Spacer(); Text("AniLibria").font(.caption).foregroundStyle(.purple) } }
-                        ForEach(anime.episodes ?? []) { episode in
-                            NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: {
-                                HStack(spacing: 14) { Image(systemName: "play.fill").frame(width: 42, height: 42).background(.purple.opacity(0.24), in: RoundedRectangle(cornerRadius: 12)); VStack(alignment: .leading, spacing: 4) { Text("Серия \((episode.ordinal ?? 0).formatted())").font(.subheadline.bold()); if let name = episode.name { Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1) } }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }.padding(12).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
-                            }.buttonStyle(.plain)
-                        }
-                    }.padding(.horizontal, 20)
-                }.padding(.bottom, 30)
-            } else if let error { ContentUnavailableView("Источник недоступен", systemImage: "wifi.exclamationmark", description: Text(error)) } else { ProgressView().padding() }
-        }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline).task { do { anime = id < 0 ? try await YaniAPI.detail(-id) : try await Libria().release(id) } catch { self.error = error.localizedDescription } }
-    }
-}
 struct YaniSearchResponse: Decodable {
     struct Item: Decodable {
         struct RemoteIDs: Decodable { let myanimelist_id: Int? }
@@ -457,65 +322,6 @@ enum YaniError: LocalizedError {
         case .noIdentifier: return "Для безопасного сопоставления отсутствует MAL ID."
         case .noMatch: return "Однозначное совпадение по MAL ID не найдено."
         }
-    }
-}
-struct YaniSourcesView: View {
-    let anime: Anime
-    @State private var videos: [YaniVideo] = []
-    @State private var error: String?
-    @State private var loading = false
-    @State private var loaded = false
-    @AppStorage("preferredYaniVoice") private var preferred = ""
-    var groups: [(key: String, count: Int)] {
-        let grouped = Dictionary(grouping: videos.filter { $0.supportsNativePlayback }, by: \.groupKey)
-        return grouped.map { (key: $0.key, count: $0.value.count) }.sorted { a, b in
-            if (a.key == preferred) != (b.key == preferred) { return a.key == preferred }
-            return a.key.localizedStandardCompare(b.key) == .orderedAscending
-        }
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack { Text(anime.id < 0 ? "Озвучки и серии" : "Другие озвучки").font(.title2.bold()); Spacer(); if loading { ProgressView() } }
-            Text("Озвучки · Aksor и CVH").font(.caption).foregroundStyle(.secondary)
-            if !loaded && !loading { Button("Найти озвучки") { Task { await load() } }.buttonStyle(.bordered) }
-            if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
-            if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let video = videos.first(where: { "yani-\($0.id)" == last.episodeID && $0.supportsNativePlayback }) {
-                NavigationLink { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: videos.filter { $0.supportsNativePlayback }) } label: { Label("Продолжить · \(video.voiceName) · серия \(video.number ?? "—")", systemImage: "play.fill").font(.subheadline.bold()).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
-            }
-            if anime.id < 0, let first = videos.filter({ $0.supportsNativePlayback }).sorted(by: { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending }).first(where: { preferred.isEmpty || $0.groupKey == preferred }) ?? videos.first(where: { $0.supportsNativePlayback }) {
-                NavigationLink { MultiSourcePlayerScreen(sourceAnime: anime, video: first, videos: videos.filter { $0.supportsNativePlayback }) } label: { Label("Смотреть · \(first.voiceName)", systemImage: "play.fill").font(.headline).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
-            }
-            DisclosureGroup("Выбрать озвучку · \(groups.count)") {
-            ForEach(groups, id: \.key) { group in
-                NavigationLink {
-                    YaniEpisodesView(anime: anime, name: group.key, videos: videos.filter { $0.supportsNativePlayback })
-                } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) серий · выбрать озвучку").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
-            }
-            }
-        }.task { if !loaded && !loading { await load() } }
-    }
-    func load() async {
-        loading = true; error = nil
-        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if !videos.contains(where: { $0.supportsNativePlayback }) { error = anime.id < 0 ? "YummyAnime не вернул потоков Aksor или CVH. Для остальных балансеров нативный адаптер пока не подключён." : "Для этого тайтла пока нет поддерживаемых дополнительных потоков. Выберите серии AniLibria ниже." } }
-        catch { self.error = "YummyAnime: \(error.localizedDescription)" }
-        loading = false
-    }
-}
-struct YaniEpisodesView: View {
-    let anime: Anime
-    let name: String
-    let videos: [YaniVideo]
-    @AppStorage("preferredYaniVoice") private var preferred = ""
-    var sorted: [YaniVideo] { videos.filter { $0.groupKey == name }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
-    var body: some View {
-        List {
-            Section { Button(preferred == name ? "Убрать из предпочтений" : "Предпочитать эту озвучку и плеер") { preferred = preferred == name ? "" : name } }
-            Section("Серии") {
-                ForEach(sorted) { video in
-                    if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: videos) } }
-                }
-            }
-        }.scrollContentBackground(.hidden).background(Color(red: 0.045, green: 0.04, blue: 0.075)).navigationTitle(name).navigationBarTitleDisplayMode(.inline)
     }
 }
 struct CVHPlaylist: Decodable {
@@ -598,13 +404,13 @@ struct AksorResolver {
     private var tickCount = 0
     private var reportedFrame = false
     var key: String { "progress.\(anime.id).yani-\(selected.id)" }
-    var voices: [String] { Array(Set(videos.map(\.groupKey))).sorted() }
+    var voices: [String] { VoicePreferences.sortedGroups(videos) }
     var hasNext: Bool { guard let index = episodes.firstIndex(where: { $0.id == selected.id }) else { return false }; return episodes.indices.contains(index + 1) }
     var audioTracks: [(id: Int32, name: String)] { tracks(player.audioTrackIndexes as? [NSNumber] ?? [], player.audioTrackNames as? [String] ?? []) }
     var subtitleTracks: [(id: Int32, name: String)] { tracks(player.videoSubTitlesIndexes as? [NSNumber] ?? [], player.videoSubTitlesNames as? [String] ?? []) }
     private func tracks(_ ids: [NSNumber], _ names: [String]) -> [(id: Int32, name: String)] { ids.enumerated().compactMap { index, id in names.indices.contains(index) ? (id.int32Value, id.int32Value == -1 ? "Выключено" : names[index]) : nil } }
-    var episodes: [YaniVideo] { videos.filter { $0.groupKey == selected.groupKey }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
-    init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; selected = video }
+    var episodes: [YaniVideo] { orderedEpisodes(videos.filter { $0.groupKey == selected.groupKey }) }
+    init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; selected = video; quality = UserDefaults.standard.string(forKey: "defaultQuality") ?? "720p"; let saved = UserDefaults.standard.float(forKey: "playbackRate"); rate = (0.5...2).contains(saved) ? saved : 1 }
     func start() {
         guard poll == nil else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -616,12 +422,13 @@ struct AksorResolver {
     func save() {
         guard !finished, pendingSeek == nil, seconds > 0, seconds.isFinite else { return }
         UserDefaults.standard.set(seconds, forKey: key)
-        HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: "yani-\(selected.id)", episodeNumber: Double(selected.number ?? ""), seconds: seconds, updated: Date()))
+        HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: "yani-\(selected.id)", episodeNumber: Double(selected.number ?? ""), seconds: seconds, updated: Date(), imageURL: anime.imageURL, duration: duration))
     }
     func select(_ video: YaniVideo, preservePosition: Bool = false) {
         save(); let prior = preservePosition ? seconds : UserDefaults.standard.double(forKey: "progress.\(anime.id).yani-\(video.id)")
         task?.cancel(); player.stop(); selected = video; seconds = prior; pendingSeek = prior; error = nil; notice = nil; choices = []; duration = 0; seekable = false; finished = false; loading = true
         UserDefaults.standard.set(video.groupKey, forKey: "preferredYaniVoice")
+        UserDefaults.standard.set(video.groupKey, forKey: "voice.\(anime.id)")
         task = Task {
             do {
                 let result = try await (video.page?.host == "player.aksor.tv" ? AksorResolver().resolve(video) : CVHResolver().resolve(video))
@@ -653,11 +460,14 @@ struct AksorResolver {
         guard let video = videos.first(where: { $0.groupKey == name && episodeIdentity($0.number) == episodeIdentity(selected.number) }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
         select(video, preservePosition: true)
     }
+    var hasPrevious: Bool { guard let index = episodes.firstIndex(where: { $0.id == selected.id }) else { return false }; return index > 0 }
+    func previous() { guard let index = episodes.firstIndex(where: { $0.id == selected.id }), index > 0 else { return }; select(episodes[index - 1]) }
     func next() {
         guard let index = episodes.firstIndex(where: { $0.id == selected.id }), episodes.indices.contains(index + 1) else { return }
         select(episodes[index + 1])
     }
-    func seek(_ value: Double) { guard value.isFinite, player.isSeekable else { return }; let target = max(0, min(value, duration > 0 ? duration : 2_000_000)); player.time = VLCTime(int: Int32(target * 1000)); seconds = target }
+    func seek(_ value: Double) { guard value.isFinite, player.isSeekable else { return }; let target = PlaybackMath.seekTarget(value, duration: duration); player.time = VLCTime(int: Int32(target * 1000)); seconds = target }
+    func setRate(_ value: Float) { guard (0.5...2).contains(value) else { return }; rate = value; player.rate = value; UserDefaults.standard.set(value, forKey: "playbackRate") }
     func toggle() { if finished { select(selected); return }; if player.isPlaying { player.pause() } else { player.play(); player.rate = rate } }
     func tick() {
         playing = player.isPlaying; seekable = player.isSeekable
@@ -683,7 +493,7 @@ struct AksorResolver {
                     self.seek(15); self.toggle()
                     for _ in 0..<10 {
                         try? await Task.sleep(for: .seconds(1))
-                        if self.player.isPlaying && self.player.time.intValue >= 10000 { NSLog("ANIMEAPP_CONTROLS_%@ passed", probe); return }
+                        if self.player.isPlaying && (13000...23000).contains(self.player.time.intValue) { NSLog("ANIMEAPP_CONTROLS_%@ passed target=15 actual=%.2f", probe, Double(self.player.time.intValue) / 1000); return }
                     }
                     NSLog("ANIMEAPP_CONTROLS_%@ failed resume/seek", probe)
                 }
@@ -702,204 +512,6 @@ struct VLCSurface: UIViewRepresentable {
     func makeUIView(context: Context) -> UIView { let view = UIView(); view.backgroundColor = .black; player.drawable = view; return view }
     func updateUIView(_ view: UIView, context: Context) { if player.drawable == nil { player.drawable = view } }
 }
-struct MultiSourcePlayerScreen: View {
-    @StateObject private var model: MultiSourcePlayback
-    @Environment(\.dismiss) private var dismiss
-    @State private var controls = true
-    @State private var locked = false
-    @State private var panel: PlayerPanel?
-    @State private var scrub: Double?
-    @State private var feedback: String?
-    enum PlayerPanel: String, Identifiable { case episodes, voices, settings; var id: String { rawValue } }
-    init(sourceAnime: Anime, video: YaniVideo, videos: [YaniVideo]) { _model = StateObject(wrappedValue: MultiSourcePlayback(anime: sourceAnime, videos: videos, video: video)) }
-    var body: some View {
-        GeometryReader { geometry in
-            let landscape = geometry.size.width > geometry.size.height
-            let windowInsets = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets ?? .zero
-            ZStack {
-                Color.black
-                VLCSurface(player: model.player).ignoresSafeArea()
-                HStack(spacing: 0) {
-                    Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { jump(-10) }.onTapGesture { reveal() }
-                    Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { jump(10) }.onTapGesture { reveal() }
-                }
-                if controls && !locked {
-                    LinearGradient(colors: [.black.opacity(0.85), .clear, .clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
-                    VStack(spacing: 0) {
-                        header(landscape: landscape)
-                        Spacer()
-                        timeline
-                        actions
-                    }.padding(.horizontal, max(20, max(windowInsets.left, windowInsets.right) + 12))
-                     .padding(.top, max(16, max(geometry.safeAreaInsets.top, windowInsets.top) + 8))
-                     .padding(.bottom, max(16, max(geometry.safeAreaInsets.bottom, windowInsets.bottom) + 8))
-                     .transition(.opacity)
-                    if model.error == nil { transport }
-                }
-                if model.loading && model.error == nil { ProgressView("Подключаем видео…").tint(.white).foregroundStyle(.white).padding(18).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14)).allowsHitTesting(false) }
-                if let error = model.error {
-                    VStack(spacing: 14) {
-                        Image(systemName: "wifi.exclamationmark").font(.largeTitle)
-                        Text("Не удалось продолжить просмотр").font(.headline)
-                        Text(error).font(.footnote).multilineTextAlignment(.center).lineLimit(4).foregroundStyle(.white.opacity(0.7))
-                        HStack { Button("Повторить") { model.select(model.selected, preservePosition: true) }.buttonStyle(.borderedProminent); Button("Озвучки") { panel = .voices }.buttonStyle(.bordered) }
-                    }.padding(24).frame(maxWidth: 380).background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 20)).padding(24)
-                }
-                if locked {
-                    VStack { Spacer(); Button { locked = false; controls = true } label: { Label("Разблокировать", systemImage: "lock.open.fill").font(.subheadline.bold()).padding(14).background(.black.opacity(0.7), in: Capsule()) }.padding(.bottom, max(24, geometry.safeAreaInsets.bottom + 12)) }
-                }
-                if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(16).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
-            }.foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
-            #if DEBUG
-            .task(id: landscape) {
-                guard landscape, ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" else { return }
-                try? await Task.sleep(for: .seconds(3))
-                guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }), scene.interfaceOrientation.isLandscape,
-                      let window = scene.windows.first(where: \.isKeyWindow), window.bounds.width > window.bounds.height else { NSLog("ANIMEAPP_LANDSCAPE failed scene orientation"); return }
-                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
-                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("player-landscape.png")
-                do { try image.pngData()?.write(to: url); NSLog("ANIMEAPP_LANDSCAPE verified %.0fx%.0f", window.bounds.width, window.bounds.height) } catch { NSLog("ANIMEAPP_LANDSCAPE failed capture") }
-            }
-            #endif
-        }.ignoresSafeArea().background(.black)
-        .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar)
-        .sheet(item: $panel) { selection in selectionSheet(selection) }
-        .statusBarHidden(true)
-        .task(id: "\(controls)-\(model.playing)-\(panel?.id ?? "none")-\(scrub != nil)") {
-            #if DEBUG
-            if ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] != nil { return }
-            #endif
-            guard controls else { return }; do { try await Task.sleep(for: .seconds(5)); if model.playing && panel == nil && scrub == nil && model.error == nil { withAnimation { controls = false } } } catch {} }
-        .onChange(of: model.playing) { _, playing in if !playing { controls = true } }
-        .onChange(of: panel) { _, value in if value != nil { controls = true } }
-        .onAppear {
-            model.start()
-            #if DEBUG
-            if ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" { Task { try? await Task.sleep(for: .seconds(1)); rotate(.landscapeRight) } }
-            #endif
-        }.onDisappear { model.stop() }
-    }
-    private func header(landscape: Bool) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            Button { rotate(.portrait); dismiss() } label: { Image(systemName: "chevron.left").font(.title3.bold()).frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle()) }.accessibilityLabel("Закрыть плеер")
-            VStack(alignment: .leading, spacing: 5) {
-                Text(model.anime.name.main).font(.headline).lineLimit(landscape ? 1 : 2)
-                Text("Серия \(model.selected.number ?? "—") · \(model.selected.voiceName)").font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
-            }.padding(.top, 4)
-            Spacer(minLength: 0)
-            Button { locked = true; controls = false } label: { Image(systemName: "lock.open").frame(width: 40, height: 44) }.accessibilityLabel("Заблокировать управление")
-            Button { rotate(landscape ? .portrait : .landscapeRight) } label: { Image(systemName: landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right").frame(width: 40, height: 44) }.accessibilityLabel(landscape ? "Портретный режим" : "Полный экран")
-        }
-    }
-    private var transport: some View {
-        HStack(spacing: 42) {
-            Button { jump(-10) } label: { Image(systemName: "gobackward.10").font(.system(size: 30)).frame(width: 52, height: 64) }.disabled(!model.seekable)
-            Button { model.toggle(); controls = true } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").font(.system(size: 36)).frame(width: 76, height: 76).background(.black.opacity(0.4), in: Circle()) }.disabled(model.loading)
-            Button { jump(10) } label: { Image(systemName: "goforward.10").font(.system(size: 30)).frame(width: 52, height: 64) }.disabled(!model.seekable)
-        }.opacity(model.loading ? 0 : 1)
-    }
-    private var timeline: some View {
-        VStack(spacing: 0) {
-            if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(2) }
-            if model.duration > 0 {
-                Slider(value: Binding(get: { min(scrub ?? model.seconds, model.duration) }, set: { scrub = $0 }), in: 0...max(1, model.duration), onEditingChanged: { editing in if !editing { if let scrub { model.seek(scrub) }; scrub = nil; controls = true } }).tint(.purple).disabled(!model.seekable || model.loading)
-                HStack { Text(clock(scrub ?? model.seconds)); Spacer(); Text(clock(model.duration)) }.font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
-            } else { Text("Серия \(model.selected.number ?? "—")").font(.caption).foregroundStyle(.white.opacity(0.7)) }
-        }
-    }
-    private var actions: some View {
-        HStack(spacing: 12) {
-            Button { panel = .episodes } label: { Label("Серии", systemImage: "list.bullet.rectangle") }
-            Spacer()
-            Button { panel = .voices } label: { Label("Озвучка", systemImage: "waveform") }
-            Spacer()
-            Button { panel = .settings } label: { Image(systemName: "gearshape") }.accessibilityLabel("Настройки плеера")
-            if model.hasNext { Button { model.next(); controls = true } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Следующая серия") }
-        }.font(.subheadline.weight(.semibold)).buttonStyle(.plain).frame(minHeight: 50).padding(.top, 8)
-    }
-    private func selectionSheet(_ selection: PlayerPanel) -> some View {
-        NavigationStack {
-            List {
-                switch selection {
-                case .episodes:
-                    Section(model.selected.voiceName) {
-                        ForEach(model.episodes) { video in
-                            Button { model.select(video); panel = nil } label: {
-                                HStack {
-                                    Label("Серия \(video.number ?? "—")", systemImage: video.id == model.selected.id ? "play.circle.fill" : "play.circle")
-                                    Spacer()
-                                    if video.id == model.selected.id { Image(systemName: "checkmark") }
-                                }.padding(.vertical, 7)
-                            }
-                        }
-                    }
-                case .voices:
-                    Section("Серия \(model.selected.number ?? "—")") {
-                        ForEach(model.voices, id: \.self) { voice in
-                            let available = model.videos.contains { $0.groupKey == voice && episodeIdentity($0.number) == episodeIdentity(model.selected.number) }
-                            Button { model.chooseVoice(voice); panel = nil } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    HStack {
-                                        Text(voice); Spacer()
-                                        if voice == model.selected.groupKey { Image(systemName: "checkmark") }
-                                    }
-                                    if !available { Text("Эта серия ещё недоступна").font(.caption).foregroundStyle(.secondary) }
-                                }
-                            }.disabled(!available)
-                        }
-                    }
-                case .settings:
-                    Section("Качество") {
-                        ForEach(model.choices) { choice in
-                            Button { model.changeQuality(choice); panel = nil } label: {
-                                HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } }
-                            }
-                        }
-                    }
-                    Section("Скорость") {
-                        Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.rate = $0; model.player.rate = $0 })) {
-                            ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) }
-                        }
-                    }
-                    Section("Звук") {
-                        ForEach(model.audioTracks, id: \.id) { track in
-                            Button { model.player.currentAudioTrackIndex = track.id; model.objectWillChange.send() } label: {
-                                HStack { Text(track.name); Spacer(); if model.player.currentAudioTrackIndex == track.id { Image(systemName: "checkmark") } }
-                            }
-                        }
-                    }
-                    Section("Субтитры") {
-                        if model.subtitleTracks.isEmpty { Text("Источник не предоставил отдельные субтитры").foregroundStyle(.secondary) }
-                        ForEach(model.subtitleTracks, id: \.id) { track in
-                            Button { model.player.currentVideoSubTitleIndex = track.id; model.objectWillChange.send() } label: {
-                                HStack { Text(track.name); Spacer(); if model.player.currentVideoSubTitleIndex == track.id { Image(systemName: "checkmark") } }
-                            }
-                        }
-                    }
-                }
-            }.navigationTitle(selection == .episodes ? "Серии" : selection == .voices ? "Озвучки и источники" : "Настройки плеера")
-             .navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { panel = nil } }
-        }.preferredColorScheme(.dark).tint(.purple).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-    }
-    private func reveal() { guard !locked else { return }; withAnimation(.easeInOut(duration: 0.2)) { controls.toggle() } }
-    private func jump(_ delta: Double) {
-        guard !locked, model.seekable else { return }; model.seek(model.seconds + delta); feedback = delta > 0 ? "+10 сек" : "−10 сек"
-        Task { try? await Task.sleep(for: .seconds(0.8)); feedback = nil }
-    }
-    private func rotate(_ orientation: UIInterfaceOrientationMask) {
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }) else { return }
-        scene.windows.first(where: \.isKeyWindow)?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { error in
-            model.notice = "Поворот недоступен: \(error.localizedDescription)"
-        }
-    }
-    private func clock(_ value: Double) -> String { let s = Int(max(0, value)); return String(format: "%d:%02d", s / 60, s % 60) }
-}
-func episodeIdentity(_ number: String?) -> String {
-    let value = (number ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    if let numeric = Double(value.replacingOccurrences(of: ",", with: ".")), numeric.isFinite, numeric >= 0 { return String(numeric) }
-    return value.lowercased()
-}
 struct HistoryEntry: Codable, Identifiable {
     let id: Int
     let title: String
@@ -907,6 +519,8 @@ struct HistoryEntry: Codable, Identifiable {
     let episodeNumber: Double?
     let seconds: Double
     let updated: Date
+    var imageURL: URL? = nil
+    var duration: Double? = nil
 }
 enum HistoryStore {
     static let storageKey = "viewingHistory.v1"
@@ -985,7 +599,7 @@ enum HistoryStore {
     func saveProgress() {
         guard current.isFinite, current > 0 else { return }
         UserDefaults.standard.set(current, forKey: key)
-        HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: episode.id, episodeNumber: episode.ordinal, seconds: current, updated: Date()))
+        HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: episode.id, episodeNumber: episode.ordinal, seconds: current, updated: Date(), imageURL: anime.imageURL, duration: episode.duration))
     }
     func seek(_ seconds: Double) { player.seek(to: CMTime(seconds: seconds, preferredTimescale: 600)) }
     func select(_ selected: Episode, saveCurrent: Bool = true) {
@@ -1097,41 +711,16 @@ struct LibraryControls: View {
         data = LocalLibrary.encode(items)
     }
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             Menu {
                 ForEach(WatchStatus.allCases) { status in Button(status.rawValue) { var entry = current; entry.status = status; update(entry) } }
                 if current.status != nil { Button("Убрать из списка", role: .destructive) { var entry = current; entry.status = nil; update(entry) } }
-            } label: { Label(current.status?.rawValue ?? "Добавить в библиотеку", systemImage: "bookmark") }
-            Spacer()
-            Button { var entry = current; entry.favorite.toggle(); update(entry) } label: { Label(current.favorite ? "В избранном" : "В избранное", systemImage: current.favorite ? "heart.fill" : "heart") }
-        }.font(.subheadline).buttonStyle(.bordered)
+            } label: { Label(current.status?.rawValue ?? "В список", systemImage: current.status == nil ? "plus" : "bookmark.fill").font(.subheadline.bold()).frame(maxWidth: .infinity).padding(14).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 14)) }
+            Button { var entry = current; entry.favorite.toggle(); update(entry) } label: { Image(systemName: current.favorite ? "heart.fill" : "heart").foregroundStyle(current.favorite ? Cinema.accent : .white).frame(width: 52, height: 48).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 14)) }.accessibilityLabel(current.favorite ? "Убрать из избранного" : "В избранное")
+        }.buttonStyle(.plain)
     }
 }
-struct LibraryView: View {
-    @AppStorage(HistoryStore.storageKey) private var historyData = Data()
-    @AppStorage(LocalLibrary.key) private var libraryData = Data()
-    @State private var selection = "История"
-    var history: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: historyData)) ?? [] }
-    var library: [LibraryEntry] { LocalLibrary.decode(libraryData) }
-    var visible: [LibraryEntry] { selection == "Избранное" ? library.filter(\.favorite) : library.filter { $0.status?.rawValue == selection } }
-    var body: some View {
-        NavigationStack {
-            List {
-                if selection == "История" {
-                    if history.isEmpty { Text("Просмотренные тайтлы появятся здесь.").foregroundStyle(.secondary) }
-                    ForEach(history) { entry in NavigationLink { DetailView(id: entry.id) } label: { VStack(alignment: .leading) { Text(entry.title); Text("Серия \((entry.episodeNumber ?? 0).formatted()) · \(Int(entry.seconds / 60)) мин.").font(.caption).foregroundStyle(.secondary) } } }
-                    .onDelete { offsets in var all = history; all.remove(atOffsets: offsets); historyData = (try? JSONEncoder().encode(all)) ?? Data() }
-                } else {
-                    if visible.isEmpty { Text("В этом разделе пока нет тайтлов.").foregroundStyle(.secondary) }
-                    ForEach(visible) { entry in NavigationLink { DetailView(id: entry.id) } label: {
-                        HStack { AsyncImage(url: entry.imageURL) { image in image.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(width: 54, height: 75).clipped().cornerRadius(8); Text(entry.title); Spacer(); if entry.favorite { Image(systemName: "heart.fill").foregroundStyle(.purple) } }
-                    } }
-                }
-            }.navigationTitle("Библиотека")
-             .toolbar { ToolbarItem(placement: .topBarTrailing) { Menu(selection) { Button("История") { selection = "История" }; Button("Избранное") { selection = "Избранное" }; ForEach(WatchStatus.allCases) { status in Button(status.rawValue) { selection = status.rawValue } } } } }
-        }
-    }
-}
+
 struct LibraryBackup: Codable {
     let version: Int
     let library: [LibraryEntry]
@@ -1173,6 +762,8 @@ struct SettingsView: View {
     @AppStorage("autoSkipOpening") private var opening = false
     @AppStorage("autoSkipEnding") private var ending = false
     @AppStorage("autoNext") private var autoNext = true
+    @AppStorage("openPlayerLandscape") private var landscape = false
+    @AppStorage("defaultQuality") private var defaultQuality = "720p"
     @State private var exporting = false
     @State private var importing = false
     @State private var exportDocument: BackupDocument?
@@ -1180,8 +771,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Воспроизведение") { Toggle("Следующая серия автоматически", isOn: $autoNext) }
-                Section("Пропуск") { Toggle("Автоматически пропускать опенинг", isOn: $opening); Toggle("Автоматически пропускать эндинг", isOn: $ending); Text("Используются метки источника; данные AniSkip применяются только при близкой длительности. Различия монтажа всё равно возможны.").font(.footnote).foregroundStyle(.secondary) }
+                Section("Просмотр") {
+                    Toggle("Следующая серия автоматически", isOn: $autoNext)
+                    Toggle("Открывать плеер на весь экран", isOn: $landscape)
+                    Picker("Предпочитаемое качество", selection: $defaultQuality) { ForEach(["360p", "480p", "720p", "1080p"], id: \.self) { Text($0) } }
+                    Text("Если выбранного качества нет, используется вариант, доступный у источника.").font(.footnote).foregroundStyle(.secondary)
+                }
+                Section("Пропуск · AniLibria") { Toggle("Автоматически пропускать опенинг", isOn: $opening); Toggle("Автоматически пропускать эндинг", isOn: $ending); Text("Используются метки источника; данные AniSkip применяются только при близкой длительности. Различия монтажа всё равно возможны.").font(.footnote).foregroundStyle(.secondary) }
                 Section("Библиотека") {
                     Button("Экспортировать JSON") { exportDocument = BackupDocument(backup: LibraryBackup.make()); exporting = true }
                     Button("Импортировать JSON") { importing = true }
