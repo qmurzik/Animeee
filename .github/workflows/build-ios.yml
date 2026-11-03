@@ -59,6 +59,7 @@ jobs:
           xcrun simctl boot "$SIMULATOR_ID" || true
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl ui "$SIMULATOR_ID" appearance dark
+          codesign --force --deep --sign - simbuild/Build/Products/Debug-iphonesimulator/AnimeApp.app
           xcrun simctl install "$SIMULATOR_ID" simbuild/Build/Products/Debug-iphonesimulator/AnimeApp.app
           xcrun simctl launch "$SIMULATOR_ID" com.animeapp.viewer
           sleep 15
@@ -67,3 +68,14 @@ jobs:
         with:
           name: simulator-home
           path: home.png
+      - name: Collect simulator diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          xcrun simctl spawn "$SIMULATOR_ID" log show --last 5m --style compact --predicate 'process == "AnimeApp"' > diagnostics/app.log 2>&1 || true
+          find "$HOME/Library/Logs/DiagnosticReports" -name '*AnimeApp*' -exec cp {} diagnostics/ \; 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: simulator-diagnostics
+          path: diagnostics
