@@ -728,14 +728,13 @@ struct MultiSourcePlayerScreen: View {
                     VStack(spacing: 0) {
                         header(landscape: landscape)
                         Spacer()
-                        if model.error == nil { transport }
-                        Spacer()
                         timeline
                         actions
                     }.padding(.horizontal, max(20, max(windowInsets.left, windowInsets.right) + 12))
                      .padding(.top, max(16, max(geometry.safeAreaInsets.top, windowInsets.top) + 8))
                      .padding(.bottom, max(16, max(geometry.safeAreaInsets.bottom, windowInsets.bottom) + 8))
                      .transition(.opacity)
+                    if model.error == nil { transport }
                 }
                 if model.loading && model.error == nil { ProgressView("Подключаем видео…").tint(.white).foregroundStyle(.white).padding(18).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14)).allowsHitTesting(false) }
                 if let error = model.error {
@@ -755,7 +754,7 @@ struct MultiSourcePlayerScreen: View {
         .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar)
         .sheet(item: $panel) { selection in selectionSheet(selection) }
         .statusBarHidden(true)
-        .task(id: controls) {
+        .task(id: "\(controls)-\(model.playing)-\(panel?.id ?? "none")-\(scrub != nil)") {
             #if DEBUG
             if ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] != nil { return }
             #endif
@@ -792,7 +791,7 @@ struct MultiSourcePlayerScreen: View {
         VStack(spacing: 0) {
             if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(2) }
             if model.duration > 0 {
-                Slider(value: Binding(get: { min(scrub ?? model.seconds, model.duration) }, set: { scrub = $0 }), in: 0...max(1, model.duration), onEditingChanged: { editing in if !editing { if let scrub { model.seek(scrub) }; scrub = nil; controls = true } }).tint(.purple).disabled(!model.seekable)
+                Slider(value: Binding(get: { min(scrub ?? model.seconds, model.duration) }, set: { scrub = $0 }), in: 0...max(1, model.duration), onEditingChanged: { editing in if !editing { if let scrub { model.seek(scrub) }; scrub = nil; controls = true } }).tint(.purple).disabled(!model.seekable || model.loading)
                 HStack { Text(clock(scrub ?? model.seconds)); Spacer(); Text(clock(model.duration)) }.font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
             } else { Text("Серия \(model.selected.number ?? "—")").font(.caption).foregroundStyle(.white.opacity(0.7)) }
         }
