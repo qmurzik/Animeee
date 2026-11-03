@@ -90,7 +90,13 @@ struct MirrorTransport {
             var request = URLRequest(url: url, timeoutInterval: 12)
             request.setValue("application/json, text/html;q=0.9", forHTTPHeaderField: "Accept")
             request.setValue("AnimeApp/0.8 (iOS client)", forHTTPHeaderField: "User-Agent")
-            if anilib { request.setValue("5", forHTTPHeaderField: "Site-Id") }
+            if anilib {
+                request.setValue("5", forHTTPHeaderField: "Site-Id")
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue(TimeZone.current.identifier, forHTTPHeaderField: "Client-Time-Zone")
+                request.setValue("https://animelib.org", forHTTPHeaderField: "Origin")
+                request.setValue("https://animelib.org/", forHTTPHeaderField: "Referer")
+            }
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }

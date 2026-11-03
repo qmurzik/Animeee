@@ -40,6 +40,10 @@ final class SourceTests: XCTestCase {
     func testAnilibUsesCurrentSiteIDAndExplicitShikimoriReference() async throws {
         SourceMockProtocol.respond = { r in
             XCTAssertEqual(r.value(forHTTPHeaderField: "Site-Id"), "5")
+            XCTAssertEqual(r.value(forHTTPHeaderField: "Origin"), "https://animelib.org")
+            XCTAssertEqual(r.value(forHTTPHeaderField: "Referer"), "https://animelib.org/")
+            XCTAssertEqual(r.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertNotNil(r.value(forHTTPHeaderField: "Client-Time-Zone"))
             let c = URLComponents(url: r.url!, resolvingAgainstBaseURL: false)!
             XCTAssertEqual(c.queryItems?.first(where: { $0.name == "site_id[]" })?.value, "5")
             return (200, #"{"data":[{"id":11,"name":"Naruto","rus_name":"Наруто","slug_url":"11--naruto-anime","cover":{"default":"https://cover.hentaicdn.org/naruto.jpg"},"shikimori_href":"https://shikimori.io/animes/z20-naruto"}]}"#)
