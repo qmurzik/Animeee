@@ -614,7 +614,7 @@ struct AksorResolver {
     }
     func stop() { save(); task?.cancel(); poll?.invalidate(); poll = nil; player.stop(); player.drawable = nil; UIApplication.shared.isIdleTimerDisabled = false }
     func save() {
-        guard !finished, seconds > 0, seconds.isFinite else { return }
+        guard !finished, pendingSeek == nil, seconds > 0, seconds.isFinite else { return }
         UserDefaults.standard.set(seconds, forKey: key)
         HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: "yani-\(selected.id)", episodeNumber: Double(selected.number ?? ""), seconds: seconds, updated: Date()))
     }
