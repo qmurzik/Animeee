@@ -129,8 +129,7 @@ struct YaniAPIError: LocalizedError {
     var errorDescription: String? { message }
 }
 final class YaniHTTP: NSObject, URLSessionTaskDelegate {
-    static let shared = YaniHTTP()
-    lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+    static let session = URLSession(configuration: .ephemeral, delegate: YaniHTTP(), delegateQueue: nil)
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
         completionHandler(request.url?.host == "api.yani.tv" && request.url?.scheme == "https" ? request : nil)
     }
@@ -143,7 +142,7 @@ enum YaniAPI {
         request.setValue("application/json", forHTTPHeaderField: "Accept"); request.setValue("ru", forHTTPHeaderField: "Lang")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         if let bearer = token ?? SessionKeychain.read(), !bearer.isEmpty { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
-        let (data, response) = try await YaniHTTP.shared.session.data(for: request)
+        let (data, response) = try await YaniHTTP.session.data(for: request)
         guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
         guard (200..<300).contains(response.statusCode) else {
             let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -213,7 +212,7 @@ struct YaniAccountView: View {
                 YaniSiteLogin { token in
                     guard !busy else { return }; busy = true
                     Task { do { let profile = try await YaniAPI.accept(token); nickname = profile.nickname ?? "YummyAnime"; authorized = true; web = false; message = nil } catch { message = error.localizedDescription }; busy = false }
-                }.safeAreaInset(edge: .top) { Text("Войдите на официальном сайте. После успешного входа приложение проверит сессию через API и сохранит её в Keychain.").font(.footnote).padding().background(.ultraThinMaterial) }
+                }.safeAreaInset(edge: .top) { Text(message ?? "Войдите на официальном сайте. После успешного входа приложение проверит сессию через API и сохранит её в Keychain.").font(.footnote).padding().background(.ultraThinMaterial) }
                 .navigationTitle("Вход на сайте").navigationBarTitleDisplayMode(.inline).toolbar { Button("Закрыть") { web = false } }
             }
         }.task { do { if let profile = try await YaniAPI.restore() { nickname = profile.nickname ?? "YummyAnime"; authorized = true } else { authorized = false } } catch { authorized = SessionKeychain.read() != nil; message = error.localizedDescription } }.onDisappear { password = "" }

@@ -55,6 +55,17 @@ class ProviderContract(unittest.TestCase):
             self.assertIn(response.status, (200, 206))
             self.assertTrue(response.read(64))
 
+    def test_yummy_independent_catalog_pagination(self):
+        first = self.get('https://api.yani.tv/anime?limit=30&offset=0')['response']
+        second = self.get('https://api.yani.tv/anime?limit=30&offset=30')['response']
+        self.assertEqual(len(first), 30)
+        self.assertEqual(len(second), 30)
+        self.assertFalse({x['anime_id'] for x in first} & {x['anime_id'] for x in second})
+        direct = self.get('https://api.yani.tv/anime/111')['response']
+        self.assertEqual(direct['anime_id'], 111)
+        videos = self.get('https://api.yani.tv/anime/111/videos')['response']
+        self.assertTrue(videos)
+
     def test_aniskip(self):
         result = self.get('https://api.aniskip.com/v2/skip-times/1735/1?types=op&types=ed&episodeLength=0')
         self.assertTrue(result['found'])
