@@ -55,7 +55,7 @@ jobs:
           PY
       - name: Build and launch on simulator
         run: |
-          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild CODE_SIGNING_ALLOWED=NO build
+          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild ARCHS=arm64 ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build
           xcrun simctl boot "$SIMULATOR_ID" || true
           xcrun simctl bootstatus "$SIMULATOR_ID" -b
           xcrun simctl ui "$SIMULATOR_ID" appearance dark
