@@ -87,6 +87,9 @@ jobs:
             done
             xcrun simctl io "$SIMULATOR_ID" screenshot "player-$source.png"
             if test "$source" = cvh; then
+              grep -q 'ANIMEAPP_LANDSCAPE verified' "probe-$source.log"
+              container=$(xcrun simctl get_app_container "$SIMULATOR_ID" com.animeapp.viewer data)
+              cp "$container/Documents/player-landscape.png" player-cvh.png
               python3 -c 'import struct; w,h=struct.unpack(">II",open("player-cvh.png","rb").read()[16:24]); print("Landscape screenshot:",w,h); assert w > h'
             fi
             cat "probe-$source.log"

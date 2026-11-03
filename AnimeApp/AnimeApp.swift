@@ -750,6 +750,17 @@ struct MultiSourcePlayerScreen: View {
                 }
                 if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(16).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
             }.foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+            #if DEBUG
+            .task(id: landscape) {
+                guard landscape, ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" else { return }
+                try? await Task.sleep(for: .seconds(3))
+                guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }), scene.interfaceOrientation.isLandscape,
+                      let window = scene.windows.first(where: \.isKeyWindow), window.bounds.width > window.bounds.height else { NSLog("ANIMEAPP_LANDSCAPE failed scene orientation"); return }
+                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("player-landscape.png")
+                do { try image.pngData()?.write(to: url); NSLog("ANIMEAPP_LANDSCAPE verified %.0fx%.0f", window.bounds.width, window.bounds.height) } catch { NSLog("ANIMEAPP_LANDSCAPE failed capture") }
+            }
+            #endif
         }.ignoresSafeArea().background(.black)
         .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar)
         .sheet(item: $panel) { selection in selectionSheet(selection) }
