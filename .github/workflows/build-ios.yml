@@ -21,6 +21,8 @@ jobs:
           test -f "$APP/Info.plist"
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = 18.0
           lipo "$APP/AnimeApp" -verify_arch arm64
+          otool -l "$APP/AnimeApp" | grep -q '@executable_path/Frameworks'
+          test -f "$APP/Frameworks/MobileVLCKit.framework/MobileVLCKit"
           mkdir -p Payload
           cp -R "$APP" Payload/
           zip -qry AnimeApp-unsigned.ipa Payload
