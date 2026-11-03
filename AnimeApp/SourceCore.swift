@@ -71,14 +71,15 @@ final class MirrorRedirects: NSObject, URLSessionTaskDelegate {
 }
 struct MirrorTransport {
     let session: URLSession
-    init(session: URLSession? = nil) {
-        if let session { self.session = session } else {
-            let config = URLSessionConfiguration.ephemeral
-            config.httpShouldSetCookies = false
-            config.urlCache = nil
-            self.session = URLSession(configuration: config, delegate: MirrorRedirects(), delegateQueue: nil)
-        }
-    }
+    // Reuse a bounded connection pool during searches instead of retaining a new delegate session per query.
+    private static let publicSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.httpShouldSetCookies = false
+        config.urlCache = nil
+        config.httpMaximumConnectionsPerHost = 4
+        return URLSession(configuration: config, delegate: MirrorRedirects(), delegateQueue: nil)
+    }()
+    init(session: URLSession? = nil) { self.session = session ?? Self.publicSession }
     func get(origins: [URL], path: String, query: [URLQueryItem] = [], anilib: Bool = false) async throws -> MirrorResponse {
         var failures: [String] = []
         for origin in origins {
