@@ -8,8 +8,6 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - run: brew install xcodegen
-      - run: xcodegen generate
       - run: xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
       - name: Package and validate
         run: |
