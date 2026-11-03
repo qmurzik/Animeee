@@ -16,12 +16,13 @@ targets:
         product: VLCKitSPM
     settings:
       base:
-        MARKETING_VERSION: 0.4.0
+        MARKETING_VERSION: 0.5.0
         CURRENT_PROJECT_VERSION: 1
         PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
         SWIFT_VERSION: '5.0'
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: AnimeApp/Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: AnimeApp
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES

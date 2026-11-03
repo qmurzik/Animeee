@@ -588,6 +588,10 @@ struct AksorResolver {
     @Published var duration: Double = 0
     @Published var playing = false
     @Published var rate: Float = 1
+    @Published var seekable = false
+    @Published var notice: String?
+    private var finished = false
+    private var seekStarted = Date()
     private var poll: Timer?
     private var task: Task<Void, Never>?
     private var pendingSeek: Double?
@@ -595,6 +599,10 @@ struct AksorResolver {
     private var reportedFrame = false
     var key: String { "progress.\(anime.id).yani-\(selected.id)" }
     var voices: [String] { Array(Set(videos.map(\.groupKey))).sorted() }
+    var hasNext: Bool { guard let index = episodes.firstIndex(where: { $0.id == selected.id }) else { return false }; return episodes.indices.contains(index + 1) }
+    var audioTracks: [(id: Int32, name: String)] { tracks(player.audioTrackIndexes as? [NSNumber] ?? [], player.audioTrackNames as? [String] ?? []) }
+    var subtitleTracks: [(id: Int32, name: String)] { tracks(player.videoSubTitlesIndexes as? [NSNumber] ?? [], player.videoSubTitlesNames as? [String] ?? []) }
+    private func tracks(_ ids: [NSNumber], _ names: [String]) -> [(id: Int32, name: String)] { ids.enumerated().compactMap { index, id in names.indices.contains(index) ? (id.int32Value, id.int32Value == -1 ? "Выключено" : names[index]) : nil } }
     var episodes: [YaniVideo] { videos.filter { $0.groupKey == selected.groupKey }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
     init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; selected = video }
     func start() {
@@ -606,13 +614,13 @@ struct AksorResolver {
     }
     func stop() { save(); task?.cancel(); poll?.invalidate(); poll = nil; player.stop(); player.drawable = nil; UIApplication.shared.isIdleTimerDisabled = false }
     func save() {
-        guard seconds > 0, seconds.isFinite else { return }
+        guard !finished, seconds > 0, seconds.isFinite else { return }
         UserDefaults.standard.set(seconds, forKey: key)
         HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: "yani-\(selected.id)", episodeNumber: Double(selected.number ?? ""), seconds: seconds, updated: Date()))
     }
     func select(_ video: YaniVideo, preservePosition: Bool = false) {
         save(); let prior = preservePosition ? seconds : UserDefaults.standard.double(forKey: "progress.\(anime.id).yani-\(video.id)")
-        task?.cancel(); player.stop(); selected = video; seconds = prior; pendingSeek = prior; error = nil; choices = []; loading = true
+        task?.cancel(); player.stop(); selected = video; seconds = prior; pendingSeek = prior; error = nil; notice = nil; choices = []; duration = 0; seekable = false; finished = false; loading = true
         UserDefaults.standard.set(video.groupKey, forKey: "preferredYaniVoice")
         task = Task {
             do {
@@ -631,7 +639,7 @@ struct AksorResolver {
             guard let xml = String(data: data, encoding: .utf8), xml.contains("<MPD"), !xml.contains("ContentProtection") else { throw URLError(.cannotDecodeContentData) }
         }
         guard !Task.isCancelled else { return }
-        player.stop(); quality = stream.label; pendingSeek = position > 0 ? position : nil
+        player.stop(); quality = stream.label; pendingSeek = position > 0 ? position : nil; seekStarted = Date()
         let media = VLCMedia(url: stream.url)
         media.addOption(":network-caching=1500")
         player.media = media; player.play(); player.rate = rate
@@ -642,21 +650,23 @@ struct AksorResolver {
         task = Task { do { try await open(stream, position: position) } catch { if !Task.isCancelled { self.error = error.localizedDescription; loading = false } } }
     }
     func chooseVoice(_ name: String) {
-        guard let video = videos.first(where: { $0.groupKey == name && $0.number == selected.number }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
+        guard let video = videos.first(where: { $0.groupKey == name && episodeIdentity($0.number) == episodeIdentity(selected.number) }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
         select(video, preservePosition: true)
     }
     func next() {
         guard let index = episodes.firstIndex(where: { $0.id == selected.id }), episodes.indices.contains(index + 1) else { return }
         select(episodes[index + 1])
     }
-    func seek(_ value: Double) { guard value.isFinite else { return }; player.time = VLCTime(int: Int32(max(0, min(value, 2_000_000)) * 1000)) }
-    func toggle() { if player.isPlaying { player.pause() } else { player.play(); player.rate = rate } }
+    func seek(_ value: Double) { guard value.isFinite, player.isSeekable else { return }; let target = max(0, min(value, duration > 0 ? duration : 2_000_000)); player.time = VLCTime(int: Int32(target * 1000)); seconds = target }
+    func toggle() { if finished { select(selected); return }; if player.isPlaying { player.pause() } else { player.play(); player.rate = rate } }
     func tick() {
-        playing = player.isPlaying
+        playing = player.isPlaying; seekable = player.isSeekable
+        if player.state == .buffering && !playing { loading = true }
+        if player.state == .paused { loading = false }
         if player.state == .error { error = "Не удалось воспроизвести поток. Попробуйте повторить или выбрать другой источник."; loading = false }
         if playing {
             loading = false
-            if let position = pendingSeek { if player.isSeekable { pendingSeek = nil; seek(position) }; return }
+            if let position = pendingSeek { if player.isSeekable { pendingSeek = nil; seek(position); return }; if Date().timeIntervalSince(seekStarted) > 12 { pendingSeek = nil; notice = "Источник не разрешает восстановить позицию." } }
             seconds = max(0, Double(player.time.intValue) / 1000)
             duration = max(0, Double(player.media?.length.intValue ?? 0) / 1000)
             #if DEBUG
@@ -665,9 +675,12 @@ struct AksorResolver {
                 NSLog("ANIMEAPP_FRAME_%@ seconds=%.2f", probe, seconds)
             }
             #endif
-            tickCount += 1; if tickCount % 10 == 0 { save() }
+            tickCount += 1; if tickCount % 10 == 0 && pendingSeek == nil { save() }
         }
-        if player.state == .ended, UserDefaults.standard.object(forKey: "autoNext") as? Bool ?? true { next() }
+        if player.state == .ended && !finished {
+            save(); finished = true; UserDefaults.standard.set(0, forKey: key)
+            if UserDefaults.standard.object(forKey: "autoNext") as? Bool ?? true { next() }
+        }
     }
 }
 struct VLCSurface: UIViewRepresentable {
@@ -677,30 +690,144 @@ struct VLCSurface: UIViewRepresentable {
 }
 struct MultiSourcePlayerScreen: View {
     @StateObject private var model: MultiSourcePlayback
-    @State private var fullscreen = false
+    @Environment(\.dismiss) private var dismiss
+    @State private var controls = true
+    @State private var locked = false
+    @State private var panel: PlayerPanel?
+    @State private var scrub: Double?
+    @State private var feedback: String?
+    enum PlayerPanel: String, Identifiable { case episodes, voices, settings; var id: String { rawValue } }
     init(sourceAnime: Anime, video: YaniVideo, videos: [YaniVideo]) { _model = StateObject(wrappedValue: MultiSourcePlayback(anime: sourceAnime, videos: videos, video: video)) }
     var body: some View {
-        GeometryReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    ZStack {
-                        VLCSurface(player: model.player).frame(height: fullscreen ? max(240, proxy.size.height - 200) : 240)
-                        if model.loading { ProgressView().tint(.white) }
-                    }.clipShape(RoundedRectangle(cornerRadius: 18))
-                    HStack { Button { model.seek(model.seconds - 10) } label: { Image(systemName: "gobackward.10") }; Spacer(); Button { model.toggle() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill") }; Spacer(); Button { model.seek(model.seconds + 10) } label: { Image(systemName: "goforward.10") }; Spacer(); Button { fullscreen.toggle() } label: { Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") } }.font(.title2).padding(.horizontal)
-                    if model.duration > 0 { Slider(value: Binding(get: { min(model.seconds, model.duration) }, set: { model.seek($0) }), in: 0...model.duration); HStack { Text(clock(model.seconds)); Spacer(); Text(clock(model.duration)) }.font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                    Text(model.anime.name.main).font(.title2.bold())
-                    HStack { Text("Серия \(model.selected.number ?? "—")").font(.headline); Spacer(); Menu(model.quality.isEmpty ? "Качество" : model.quality) { ForEach(model.choices) { choice in Button(choice.label) { model.changeQuality(choice) } } }; Menu("\(model.rate.formatted())×") { ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { value in Button("\(value.formatted())×") { model.rate = value; model.player.rate = value } } } }
-                    if let error = model.error { Text(error).font(.footnote).foregroundStyle(.orange); Button("Повторить") { model.select(model.selected, preservePosition: true) } }
-                    Menu { ForEach(model.voices, id: \.self) { voice in Button(voice) { model.chooseVoice(voice) } } } label: { Label(model.selected.groupKey, systemImage: "waveform").frame(maxWidth: .infinity, alignment: .leading).padding().background(.purple.opacity(0.15), in: RoundedRectangle(cornerRadius: 14)) }
-                    Text("Серии").font(.title2.bold())
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64))], spacing: 10) { ForEach(model.episodes) { video in Button(video.number ?? "—") { model.select(video) }.frame(maxWidth: .infinity).padding(.vertical, 14).background(video.id == model.selected.id ? Color.purple : .white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.white) } }
-                    if let native = model.anime.episodes?.first(where: { $0.ordinal == Double(model.selected.number ?? "") }) { NavigationLink("Открыть эту серию в AniLibria") { PlayerScreen(anime: model.anime, episode: native) } }
-                }.padding()
-            }.background(Color(red: 0.045, green: 0.04, blue: 0.075))
-        }.navigationBarTitleDisplayMode(.inline).onAppear { model.start() }.onDisappear { model.stop() }
+        GeometryReader { geometry in
+            let landscape = geometry.size.width > geometry.size.height
+            ZStack {
+                Color.black
+                VLCSurface(player: model.player).ignoresSafeArea()
+                HStack(spacing: 0) {
+                    Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { jump(-10) }.onTapGesture { reveal() }
+                    Color.clear.contentShape(Rectangle()).onTapGesture(count: 2) { jump(10) }.onTapGesture { reveal() }
+                }
+                if controls && !locked {
+                    LinearGradient(colors: [.black.opacity(0.85), .clear, .clear, .black.opacity(0.9)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
+                    VStack(spacing: 0) {
+                        header(landscape: landscape)
+                        Spacer()
+                        if model.error == nil { transport }
+                        Spacer()
+                        timeline
+                        actions
+                    }.padding(.horizontal, max(20, geometry.safeAreaInsets.leading + 12))
+                     .padding(.top, max(16, geometry.safeAreaInsets.top + 8))
+                     .padding(.bottom, max(16, geometry.safeAreaInsets.bottom + 8))
+                     .transition(.opacity)
+                }
+                if model.loading && model.error == nil { ProgressView("Подключаем видео…").tint(.white).foregroundStyle(.white).padding(18).background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 14)).allowsHitTesting(false) }
+                if let error = model.error {
+                    VStack(spacing: 14) {
+                        Image(systemName: "wifi.exclamationmark").font(.largeTitle)
+                        Text("Не удалось продолжить просмотр").font(.headline)
+                        Text(error).font(.footnote).multilineTextAlignment(.center).lineLimit(4).foregroundStyle(.white.opacity(0.7))
+                        HStack { Button("Повторить") { model.select(model.selected, preservePosition: true) }.buttonStyle(.borderedProminent); Button("Озвучки") { panel = .voices }.buttonStyle(.bordered) }
+                    }.padding(24).frame(maxWidth: 380).background(.black.opacity(0.92), in: RoundedRectangle(cornerRadius: 20)).padding(24)
+                }
+                if locked {
+                    VStack { Spacer(); Button { locked = false; controls = true } label: { Label("Разблокировать", systemImage: "lock.open.fill").font(.subheadline.bold()).padding(14).background(.black.opacity(0.7), in: Capsule()) }.padding(.bottom, max(24, geometry.safeAreaInsets.bottom + 12)) }
+                }
+                if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(16).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
+            }.foregroundStyle(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.ignoresSafeArea().background(.black)
+        .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar)
+        .sheet(item: $panel) { selection in selectionSheet(selection) }
+        .task(id: controls) { guard controls else { return }; do { try await Task.sleep(for: .seconds(5)); if model.playing && panel == nil && scrub == nil && model.error == nil { withAnimation { controls = false } } } catch {} }
+        .onChange(of: model.playing) { _, playing in if !playing { controls = true } }
+        .onChange(of: panel) { _, value in if value != nil { controls = true } }
+        .onAppear {
+            model.start()
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" { Task { try? await Task.sleep(for: .seconds(1)); rotate(.landscapeRight) } }
+            #endif
+        }.onDisappear { model.stop() }
     }
-    func clock(_ value: Double) -> String { let s = Int(max(0, value)); return String(format: "%d:%02d", s / 60, s % 60) }
+    private func header(landscape: Bool) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            Button { rotate(.portrait); dismiss() } label: { Image(systemName: "chevron.left").font(.title3.bold()).frame(width: 44, height: 44).background(.white.opacity(0.12), in: Circle()) }.accessibilityLabel("Закрыть плеер")
+            VStack(alignment: .leading, spacing: 5) {
+                Text(model.anime.name.main).font(.headline).lineLimit(landscape ? 1 : 2)
+                Text("Серия \(model.selected.number ?? "—") · \(model.selected.voiceName)").font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+            }.padding(.top, 4)
+            Spacer(minLength: 0)
+            Button { locked = true; controls = false } label: { Image(systemName: "lock.open").frame(width: 40, height: 44) }.accessibilityLabel("Заблокировать управление")
+            Button { rotate(landscape ? .portrait : .landscapeRight) } label: { Image(systemName: landscape ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right").frame(width: 40, height: 44) }.accessibilityLabel(landscape ? "Портретный режим" : "Полный экран")
+        }
+    }
+    private var transport: some View {
+        HStack(spacing: 42) {
+            Button { jump(-10) } label: { Image(systemName: "gobackward.10").font(.system(size: 30)).frame(width: 52, height: 64) }.disabled(!model.seekable)
+            Button { model.toggle(); controls = true } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill").font(.system(size: 36)).frame(width: 76, height: 76).background(.black.opacity(0.4), in: Circle()) }.disabled(model.loading)
+            Button { jump(10) } label: { Image(systemName: "goforward.10").font(.system(size: 30)).frame(width: 52, height: 64) }.disabled(!model.seekable)
+        }.opacity(model.loading ? 0 : 1)
+    }
+    private var timeline: some View {
+        VStack(spacing: 0) {
+            if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(.white.opacity(0.75)).lineLimit(2) }
+            if model.duration > 0 {
+                Slider(value: Binding(get: { min(scrub ?? model.seconds, model.duration) }, set: { scrub = $0 }), in: 0...max(1, model.duration), onEditingChanged: { editing in if !editing { if let scrub { model.seek(scrub) }; scrub = nil; controls = true } }).tint(.purple).disabled(!model.seekable)
+                HStack { Text(clock(scrub ?? model.seconds)); Spacer(); Text(clock(model.duration)) }.font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+            } else { Text("Серия \(model.selected.number ?? "—")").font(.caption).foregroundStyle(.white.opacity(0.7)) }
+        }
+    }
+    private var actions: some View {
+        HStack(spacing: 12) {
+            Button { panel = .episodes } label: { Label("Серии", systemImage: "list.bullet.rectangle") }
+            Spacer()
+            Button { panel = .voices } label: { Label("Озвучка", systemImage: "waveform") }
+            Spacer()
+            Button { panel = .settings } label: { Image(systemName: "gearshape") }.accessibilityLabel("Настройки плеера")
+            if model.hasNext { Button { model.next(); controls = true } label: { Image(systemName: "forward.end.fill") }.accessibilityLabel("Следующая серия") }
+        }.font(.subheadline.weight(.semibold)).buttonStyle(.plain).frame(minHeight: 50).padding(.top, 8)
+    }
+    private func selectionSheet(_ selection: PlayerPanel) -> some View {
+        NavigationStack {
+            List {
+                switch selection {
+                case .episodes:
+                    Section(model.selected.voiceName) { ForEach(model.episodes) { video in Button { model.select(video); panel = nil } label: { HStack { Label("Серия \(video.number ?? "—")", systemImage: video.id == model.selected.id ? "play.circle.fill" : "play.circle"); Spacer(); if video.id == model.selected.id { Image(systemName: "checkmark") } }.padding(.vertical, 7) } } }
+                case .voices:
+                    Section("Серия \(model.selected.number ?? "—")") {
+                        ForEach(model.voices, id: \.self) { voice in
+                            let available = model.videos.contains { $0.groupKey == voice && episodeIdentity($0.number) == episodeIdentity(model.selected.number) }
+                            Button { model.chooseVoice(voice); panel = nil } label: { VStack(alignment: .leading, spacing: 5) { HStack { Text(voice); Spacer(); if voice == model.selected.groupKey { Image(systemName: "checkmark") } }; if !available { Text("Эта серия ещё недоступна").font(.caption).foregroundStyle(.secondary) } }.disabled(!available)
+                        }
+                    }
+                case .settings:
+                    Section("Качество") { ForEach(model.choices) { choice in Button { model.changeQuality(choice); panel = nil } label: { HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } } } } }
+                    Section("Скорость") { Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.rate = $0; model.player.rate = $0 })) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) } } }
+                    Section("Звук") { ForEach(model.audioTracks, id: \.id) { track in Button { model.player.currentAudioTrackIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentAudioTrackIndex == track.id { Image(systemName: "checkmark") } } } } }
+                    Section("Субтитры") { if model.subtitleTracks.isEmpty { Text("Источник не предоставил отдельные субтитры").foregroundStyle(.secondary) }; ForEach(model.subtitleTracks, id: \.id) { track in Button { model.player.currentVideoSubTitleIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentVideoSubTitleIndex == track.id { Image(systemName: "checkmark") } } } } }
+                }
+            }.navigationTitle(selection == .episodes ? "Серии" : selection == .voices ? "Озвучки и источники" : "Настройки плеера")
+             .navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { panel = nil } }
+        }.preferredColorScheme(.dark).tint(.purple).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+    private func reveal() { guard !locked else { return }; withAnimation(.easeInOut(duration: 0.2)) { controls.toggle() } }
+    private func jump(_ delta: Double) {
+        guard !locked, model.seekable else { return }; model.seek(model.seconds + delta); feedback = delta > 0 ? "+10 сек" : "−10 сек"
+        Task { try? await Task.sleep(for: .seconds(0.8)); feedback = nil }
+    }
+    private func rotate(_ orientation: UIInterfaceOrientationMask) {
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }) else { return }
+        scene.windows.first(where: \.isKeyWindow)?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
+        scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { error in
+            model.notice = "Поворот недоступен: \(error.localizedDescription)"
+        }
+    }
+    private func clock(_ value: Double) -> String { let s = Int(max(0, value)); return String(format: "%d:%02d", s / 60, s % 60) }
+}
+func episodeIdentity(_ number: String?) -> String {
+    let value = (number ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    if let numeric = Double(value.replacingOccurrences(of: ",", with: ".")), numeric.isFinite, numeric >= 0 { return String(numeric) }
+    return value.lowercased()
 }
 struct HistoryEntry: Codable, Identifiable {
     let id: Int
