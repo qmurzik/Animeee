@@ -491,7 +491,7 @@ struct YaniSourcesView: View {
     }
     func load() async {
         loading = true; error = nil
-        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if !videos.contains(where: { $0.supportsNativePlayback }) { error = "Для этого тайтла пока нет поддерживаемых дополнительных потоков. Доступна AniLibria." } }
+        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if !videos.contains(where: { $0.supportsNativePlayback }) { error = anime.id < 0 ? "YummyAnime не вернул потоков Aksor или CVH. Для остальных балансеров нативный адаптер пока не подключён." : "Для этого тайтла пока нет поддерживаемых дополнительных потоков. Выберите серии AniLibria ниже." } }
         catch { self.error = "YummyAnime: \(error.localizedDescription)" }
         loading = false
     }
