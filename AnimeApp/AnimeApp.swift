@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import UniformTypeIdentifiers
+import WebKit
 
 struct Anime: Codable, Identifiable {
     struct Name: Codable { let main: String; let english: String? }
@@ -89,9 +90,142 @@ struct DetailView: View {
         if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let episode = anime.episodes?.first(where: { $0.id == last.episodeID }) {
             NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Продолжить: серия \((episode.ordinal ?? 0).formatted())", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(.purple).foregroundStyle(.white).cornerRadius(12) }
         }
-        Text("Серии").font(.title2.bold())
+        YaniSourcesView(anime: anime)
+        Text("Серии AniLibria").font(.title2.bold())
         ForEach(anime.episodes ?? []) { episode in NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { HStack { Image(systemName: "play.circle.fill").font(.title2); Text("Серия \((episode.ordinal ?? 0).formatted())"); Spacer(); Text(episode.name ?? "").lineLimit(1).foregroundStyle(.secondary) }.padding(12).background(.white.opacity(0.06)).cornerRadius(12) } }
     }.padding() } else if let error { ContentUnavailableView("Источник недоступен", systemImage: "wifi.exclamationmark", description: Text(error)) } else { ProgressView().padding() } }.navigationBarTitleDisplayMode(.inline).task { do { anime = try await Libria().release(id) } catch { self.error = error.localizedDescription } } }
+}
+struct YaniSearchResponse: Decodable {
+    struct Item: Decodable {
+        struct RemoteIDs: Decodable { let myanimelist_id: Int? }
+        let anime_id: Int
+        let remote_ids: RemoteIDs?
+    }
+    let response: [Item]
+}
+struct YaniVideosResponse: Decodable { let response: [YaniVideo] }
+struct YaniVideo: Decodable, Identifiable {
+    struct Info: Decodable { let player: String?; let dubbing: String? }
+    let video_id: Int
+    let data: Info?
+    let number: String?
+    let iframe_url: String?
+    var id: Int { video_id }
+    var playerName: String { data?.player?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "Неизвестный плеер" }
+    var voiceName: String { data?.dubbing?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty ?? "Неизвестный перевод" }
+    var groupKey: String { playerName + " · " + voiceName }
+    var page: URL? {
+        guard let raw = iframe_url?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty,
+              let url = URL(string: raw.hasPrefix("//") ? "https:" + raw : raw), url.scheme?.lowercased() == "https", url.host != nil else { return nil }
+        return url
+    }
+}
+extension String { var nonEmpty: String? { isEmpty ? nil : self } }
+struct YaniProvider {
+    private func fetch<T: Decodable>(_ url: URL) async throws -> T {
+        var request = URLRequest(url: url); request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+    func videos(for anime: Anime) async throws -> [YaniVideo] {
+        guard let malID = anime.mal?.id, malID > 0 else { throw YaniError.noIdentifier }
+        var components = URLComponents(string: "https://api.yani.tv/anime")!
+        components.queryItems = [URLQueryItem(name: "q", value: anime.name.main), URLQueryItem(name: "limit", value: "50")]
+        guard let url = components.url else { throw URLError(.badURL) }
+        let candidates: YaniSearchResponse = try await fetch(url)
+        let matches = candidates.response.filter { $0.remote_ids?.myanimelist_id == malID }
+        guard matches.count == 1, let match = matches.first else { throw YaniError.noMatch }
+        guard let videosURL = URL(string: "https://api.yani.tv/anime/\(match.anime_id)/videos") else { throw URLError(.badURL) }
+        let result: YaniVideosResponse = try await fetch(videosURL)
+        return result.response.filter { $0.page != nil }
+    }
+}
+enum YaniError: LocalizedError {
+    case noIdentifier, noMatch
+    var errorDescription: String? {
+        switch self {
+        case .noIdentifier: return "Для безопасного сопоставления отсутствует MAL ID."
+        case .noMatch: return "Однозначное совпадение по MAL ID не найдено."
+        }
+    }
+}
+struct YaniSourcesView: View {
+    let anime: Anime
+    @State private var videos: [YaniVideo] = []
+    @State private var error: String?
+    @State private var loading = false
+    @State private var loaded = false
+    @AppStorage("preferredYaniVoice") private var preferred = ""
+    var groups: [(key: String, count: Int)] {
+        let grouped = Dictionary(grouping: videos, by: \.groupKey)
+        return grouped.map { (key: $0.key, count: $0.value.count) }.sorted { a, b in
+            if (a.key == preferred) != (b.key == preferred) { return a.key == preferred }
+            return a.key.localizedStandardCompare(b.key) == .orderedAscending
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack { Text("Другие озвучки").font(.title2.bold()); Spacer(); if loading { ProgressView() } }
+            Text("Каталог YummyAnime · сторонние веб-плееры").font(.caption).foregroundStyle(.secondary)
+            if !loaded && !loading { Button("Найти озвучки") { Task { await load() } }.buttonStyle(.bordered) }
+            if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
+            ForEach(groups, id: \.key) { group in
+                NavigationLink {
+                    YaniEpisodesView(name: group.key, videos: videos.filter { $0.groupKey == group.key })
+                } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) записей серий · веб-плеер").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
+            }
+        }
+    }
+    func load() async {
+        loading = true; error = nil
+        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if videos.isEmpty { error = "Источник не вернул доступных страниц плеера." } }
+        catch { self.error = "YummyAnime: \(error.localizedDescription)" }
+        loading = false
+    }
+}
+struct YaniEpisodesView: View {
+    let name: String
+    let videos: [YaniVideo]
+    @AppStorage("preferredYaniVoice") private var preferred = ""
+    var sorted: [YaniVideo] { videos.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
+    var body: some View {
+        List {
+            Section { Button(preferred == name ? "Убрать из предпочтений" : "Предпочитать эту озвучку и плеер") { preferred = preferred == name ? "" : name } }
+            Section("Серии") {
+                ForEach(sorted) { video in
+                    if let page = video.page { NavigationLink("Серия \(video.number ?? "—")") { YaniWebPlayer(url: page, name: name) } }
+                }
+            }
+        }.navigationTitle(name).navigationBarTitleDisplayMode(.inline)
+    }
+}
+struct YaniWebPlayer: View {
+    let url: URL
+    let name: String
+    var body: some View {
+        VStack(spacing: 0) {
+            WebPlayerView(url: url)
+            Text("Сторонний веб-плеер: сохранение позиции, автопереход, пропуск и выбор качества управляются самим плеером и могут быть недоступны. Доступность зависит от источника и региона.")
+                .font(.footnote).foregroundStyle(.secondary).padding()
+        }.navigationTitle(name).navigationBarTitleDisplayMode(.inline)
+    }
+}
+struct WebPlayerView: UIViewRepresentable {
+    let url: URL
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration(); config.allowsInlineMediaPlayback = true; config.mediaTypesRequiringUserActionForPlayback = .all
+        let view = WKWebView(frame: .zero, configuration: config); view.navigationDelegate = context.coordinator
+        view.load(URLRequest(url: url)); return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {}
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let scheme = navigationAction.request.url?.scheme?.lowercased(), scheme == "https" || scheme == "about" else { decisionHandler(.cancel); return }
+            decisionHandler(.allow)
+        }
+    }
 }
 struct HistoryEntry: Codable, Identifiable {
     let id: Int
