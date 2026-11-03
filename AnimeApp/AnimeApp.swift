@@ -495,20 +495,7 @@ struct AksorResolver {
             if !reportedFrame, seconds > 2, player.hasVideoOut, let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] {
                 reportedFrame = true
                 NSLog("ANIMEAPP_FRAME_%@ seconds=%.2f", probe, seconds)
-                Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    self.player.pause()
-                    try? await Task.sleep(for: .seconds(1))
-                    let frozen = self.player.time.intValue
-                    try? await Task.sleep(for: .seconds(1))
-                    guard !self.player.isPlaying, abs(self.player.time.intValue - frozen) < 1000, self.player.isSeekable else { NSLog("ANIMEAPP_CONTROLS_%@ failed pause/seekability", probe); return }
-                    self.seek(15); self.toggle()
-                    for _ in 0..<10 {
-                        try? await Task.sleep(for: .seconds(1))
-                        if self.player.isPlaying && (13000...23000).contains(self.player.time.intValue) { NSLog("ANIMEAPP_CONTROLS_%@ passed target=15 actual=%.2f", probe, Double(self.player.time.intValue) / 1000); return }
-                    }
-                    NSLog("ANIMEAPP_CONTROLS_%@ failed resume/seek", probe)
-                }
+                Task { @MainActor [weak self] in await self?.probeControls(probe) }
             }
             #endif
             tickCount += 1; if tickCount % 10 == 0 && pendingSeek == nil { save() }
@@ -518,6 +505,37 @@ struct AksorResolver {
             if UserDefaults.standard.object(forKey: "autoNext") as? Bool ?? true { next() }
         }
     }
+    #if DEBUG
+    private func probeWait(_ condition: () -> Bool, attempts: Int = 50) async -> Bool {
+        for _ in 0..<attempts {
+            if condition() { return true }
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return false }
+        }
+        return condition()
+    }
+    private func probeControls(_ probe: String) async {
+        guard await probeWait({ self.player.isPlaying && self.player.isSeekable && self.player.canPause && (self.player.media?.length.intValue ?? 0) > 0 }, attempts: 100) else {
+            NSLog("ANIMEAPP_CONTROLS_%@ failed readiness state=%@ playing=%d seekable=%d canPause=%d", probe, String(describing: player.state), player.isPlaying ? 1 : 0, player.isSeekable ? 1 : 0, player.canPause ? 1 : 0); return
+        }
+        NSLog("ANIMEAPP_READY_%@ seekable=1 canPause=1", probe)
+        player.pause()
+        guard await probeWait({ self.player.state == .paused && !self.player.isPlaying }) else {
+            NSLog("ANIMEAPP_CONTROLS_%@ failed pause state=%@ playing=%d", probe, String(describing: player.state), player.isPlaying ? 1 : 0); return
+        }
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        let frozen = player.time.intValue
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        guard !player.isPlaying, abs(player.time.intValue - frozen) < 500, player.isSeekable else {
+            NSLog("ANIMEAPP_CONTROLS_%@ failed frozen clock delta=%d playing=%d seekable=%d", probe, player.time.intValue - frozen, player.isPlaying ? 1 : 0, player.isSeekable ? 1 : 0); return
+        }
+        seek(15); toggle()
+        guard await probeWait({ self.player.isPlaying && (13000...23000).contains(self.player.time.intValue) }) else {
+            NSLog("ANIMEAPP_CONTROLS_%@ failed resume time=%.2f state=%@", probe, Double(player.time.intValue) / 1000, String(describing: player.state)); return
+        }
+        NSLog("ANIMEAPP_CONTROLS_%@ passed target=15 actual=%.2f", probe, Double(player.time.intValue) / 1000)
+    }
+    #endif
+
 }
 struct VLCSurface: UIViewRepresentable {
     let player: VLCMediaPlayer
