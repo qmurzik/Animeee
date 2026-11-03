@@ -158,29 +158,34 @@ enum YaniAPI {
     }
     static func detail(_ id: Int) async throws -> Anime { let result: YaniDetailResponse = try await request("/anime/\(id)"); return result.response.anime }
     static func videos(_ id: Int) async throws -> [YaniVideo] { let result: YaniVideosResponse = try await request("/anime/\(id)/videos"); return result.response.filter { $0.page != nil } }
-    static func accept(_ token: String) async throws -> YaniProfileResponse.Profile {
+    @MainActor static func accept(_ token: String, expectedToken: String? = nil) async throws -> YaniProfileResponse.Profile {
+        let generation = UserDefaults.standard.string(forKey: "yaniRevision") ?? ""
+        if let expectedToken, SessionKeychain.read() != expectedToken { throw CancellationError() }
         guard !token.isEmpty, token.utf8.count <= 16384 else { throw URLError(.userAuthenticationRequired) }
         let profile: YaniProfileResponse = try await request("/profile", token: token)
         guard profile.response.id > 0 else { throw URLError(.userAuthenticationRequired) }
+        guard (UserDefaults.standard.string(forKey: "yaniRevision") ?? "") == generation else { throw CancellationError() }
+        if let expectedToken, SessionKeychain.read() != expectedToken { throw CancellationError() }
         try SessionKeychain.write(token)
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "yaniTokenRefreshed")
         UserDefaults.standard.set(profile.response.nickname ?? "YummyAnime", forKey: "yaniNickname")
         UserDefaults.standard.set(UUID().uuidString, forKey: "yaniRevision")
         return profile.response
     }
-    static func restore() async throws -> YaniProfileResponse.Profile? {
+    @MainActor static func restore() async throws -> YaniProfileResponse.Profile? {
         guard let token = SessionKeychain.read() else { return nil }
         do {
             if Date().timeIntervalSince1970 - UserDefaults.standard.double(forKey: "yaniTokenRefreshed") > 172800 {
                 let renewed: YaniTokenResponse = try await request("/profile/token", token: token)
-                return try await accept(renewed.response.token)
+                return try await accept(renewed.response.token, expectedToken: token)
             }
             let response: YaniProfileResponse = try await request("/profile", token: token)
+            guard SessionKeychain.read() == token else { return nil }
             return response.response
-        } catch let error as YaniAPIError where error.status == 401 { clearSession(); throw error }
+        } catch let error as YaniAPIError where error.status == 401 { if SessionKeychain.read() == token { clearSession(); throw error }; return nil }
     }
-    static func logout() async { if let token = SessionKeychain.read() { let _: YaniDiscardResponse? = try? await request("/profile/logout", method: "POST", token: token) }; clearSession() }
-    static func clearSession() { SessionKeychain.clear(); UserDefaults.standard.removeObject(forKey: "yaniNickname"); UserDefaults.standard.set(UUID().uuidString, forKey: "yaniRevision") }
+    @MainActor static func logout() async { let token = SessionKeychain.read(); clearSession(); if let token { let _: YaniDiscardResponse? = try? await request("/profile/logout", method: "POST", token: token) } }
+    @MainActor static func clearSession() { SessionKeychain.clear(); UserDefaults.standard.removeObject(forKey: "yaniNickname"); UserDefaults.standard.set(UUID().uuidString, forKey: "yaniRevision") }
 }
 struct YaniAccountView: View {
     @State private var login = ""
@@ -215,7 +220,7 @@ struct YaniAccountView: View {
                 }.safeAreaInset(edge: .top) { Text(message ?? "Войдите на официальном сайте. После успешного входа приложение проверит сессию через API и сохранит её в Keychain.").font(.footnote).padding().background(.ultraThinMaterial) }
                 .navigationTitle("Вход на сайте").navigationBarTitleDisplayMode(.inline).toolbar { Button("Закрыть") { web = false } }
             }
-        }.task { do { if let profile = try await YaniAPI.restore() { nickname = profile.nickname ?? "YummyAnime"; authorized = true } else { authorized = false } } catch { authorized = SessionKeychain.read() != nil; message = error.localizedDescription } }.onDisappear { password = "" }
+        }.task { do { if let profile = try await YaniAPI.restore() { nickname = profile.nickname ?? "YummyAnime"; authorized = true } else { authorized = SessionKeychain.read() != nil } } catch { authorized = SessionKeychain.read() != nil; message = error.localizedDescription } }.onDisappear { password = "" }
     }
     func signIn() async {
         busy = true; message = nil
