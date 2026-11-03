@@ -16,7 +16,7 @@ targets:
         product: VLCKitSPM
     settings:
       base:
-        MARKETING_VERSION: 0.3.0
+        MARKETING_VERSION: 0.4.0
         CURRENT_PROJECT_VERSION: 1
         PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"

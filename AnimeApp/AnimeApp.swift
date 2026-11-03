@@ -2,6 +2,8 @@ import SwiftUI
 import AVKit
 import VLCKitSPM
 import UniformTypeIdentifiers
+import Security
+import WebKit
 
 struct Anime: Codable, Identifiable {
     struct Name: Codable { let main: String; let english: String? }
@@ -48,7 +50,7 @@ struct Libria: AnimeProvider {
     func release(_ id: Int) async throws -> Anime { try await fetch("anime/releases/\(id)") }
 }
 @main struct AnimeApp: App {
-    var body: some Scene { WindowGroup { AppRoute().preferredColorScheme(.dark).tint(.purple) } }
+    var body: some Scene { WindowGroup { AppRoute().preferredColorScheme(.dark).tint(.purple).task { _ = try? await YaniAPI.restore() } } }
 }
 struct AppRoute: View {
     var body: some View {
@@ -75,6 +77,193 @@ struct PlaybackProbeView: View {
     }
 }
 #endif
+// YummyAnime is an independent catalog. Negative local IDs namespace its IDs
+// separately from the existing positive AniLibria IDs in saved data.
+struct YaniCatalogItem: Decodable {
+    struct Image: Decodable { let fullsize: String?; let big: String? }
+    struct IDs: Decodable { let myanimelist_id: Int? }
+    let anime_id: Int
+    let title: String
+    let description: String?
+    let year: Int?
+    let poster: Image?
+    let remote_ids: IDs?
+    var anime: Anime {
+        let image = poster?.big ?? poster?.fullsize
+        return Anime(id: -anime_id, mal: remote_ids?.myanimelist_id.map { .init(id: $0) }, name: .init(main: title, english: nil), poster: image.map { .init(src: $0.hasPrefix("//") ? "https:" + $0 : $0) }, description: description, year: year, episodes: nil)
+    }
+}
+struct YaniCatalogResponse: Decodable { let response: [YaniCatalogItem] }
+struct YaniDetailResponse: Decodable { let response: YaniCatalogItem }
+struct YaniProfileResponse: Decodable {
+    struct Profile: Decodable { let id: Int; let nickname: String? }
+    let response: Profile
+}
+struct YaniDiscardResponse: Decodable {}
+struct YaniTokenResponse: Decodable {
+    struct Token: Decodable { let token: String }
+    let response: Token
+}
+enum SessionKeychain {
+    private static let service = "com.animeapp.viewer.yani"
+    static func read() -> String? {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "session", kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+    static func write(_ token: String) throws {
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "session"]
+        let values: [String: Any] = [kSecValueData as String: Data(token.utf8), kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        let result = SecItemUpdate(query as CFDictionary, values as CFDictionary)
+        if result == errSecItemNotFound {
+            var added = query; values.forEach { added[$0.key] = $0.value }
+            guard SecItemAdd(added as CFDictionary, nil) == errSecSuccess else { throw CocoaError(.fileWriteUnknown) }
+        } else if result != errSecSuccess { throw CocoaError(.fileWriteUnknown) }
+    }
+    static func clear() { SecItemDelete([kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: "session"] as CFDictionary) }
+}
+struct YaniAPIError: LocalizedError {
+    let status: Int
+    let message: String
+    var errorDescription: String? { message }
+}
+final class YaniHTTP: NSObject, URLSessionTaskDelegate {
+    static let shared = YaniHTTP()
+    lazy var session = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: nil)
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        completionHandler(request.url?.host == "api.yani.tv" && request.url?.scheme == "https" ? request : nil)
+    }
+}
+enum YaniAPI {
+    static func request<T: Decodable>(_ path: String, query: [URLQueryItem] = [], method: String = "GET", body: Data? = nil, token: String? = nil) async throws -> T {
+        var parts = URLComponents(); parts.scheme = "https"; parts.host = "api.yani.tv"; parts.path = path; if !query.isEmpty { parts.queryItems = query }
+        guard let url = parts.url else { throw URLError(.badURL) }
+        var request = URLRequest(url: url, timeoutInterval: 25); request.httpMethod = method; request.httpBody = body
+        request.setValue("application/json", forHTTPHeaderField: "Accept"); request.setValue("ru", forHTTPHeaderField: "Lang")
+        if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        if let bearer = token ?? SessionKeychain.read(), !bearer.isEmpty { request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization") }
+        let (data, response) = try await YaniHTTP.shared.session.data(for: request)
+        guard let response = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
+        guard (200..<300).contains(response.statusCode) else {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw YaniAPIError(status: response.statusCode, message: json?["error"] as? String ?? "YummyAnime: HTTP \(response.statusCode)")
+        }
+        return try JSONDecoder().decode(T.self, from: data)
+    }
+    static func catalog(query: String? = nil, offset: Int = 0) async throws -> [Anime] {
+        var params = [URLQueryItem(name: "limit", value: "30"), URLQueryItem(name: "offset", value: String(offset))]
+        if let query, !query.isEmpty { params.append(.init(name: "q", value: query)) }
+        let result: YaniCatalogResponse = try await request("/anime", query: params)
+        return result.response.map(\.anime)
+    }
+    static func detail(_ id: Int) async throws -> Anime { let result: YaniDetailResponse = try await request("/anime/\(id)"); return result.response.anime }
+    static func videos(_ id: Int) async throws -> [YaniVideo] { let result: YaniVideosResponse = try await request("/anime/\(id)/videos"); return result.response.filter { $0.page != nil } }
+    static func accept(_ token: String) async throws -> YaniProfileResponse.Profile {
+        guard !token.isEmpty, token.utf8.count <= 16384 else { throw URLError(.userAuthenticationRequired) }
+        let profile: YaniProfileResponse = try await request("/profile", token: token)
+        guard profile.response.id > 0 else { throw URLError(.userAuthenticationRequired) }
+        try SessionKeychain.write(token)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "yaniTokenRefreshed")
+        UserDefaults.standard.set(profile.response.nickname ?? "YummyAnime", forKey: "yaniNickname")
+        UserDefaults.standard.set(UUID().uuidString, forKey: "yaniRevision")
+        return profile.response
+    }
+    static func restore() async throws -> YaniProfileResponse.Profile? {
+        guard let token = SessionKeychain.read() else { return nil }
+        do {
+            if Date().timeIntervalSince1970 - UserDefaults.standard.double(forKey: "yaniTokenRefreshed") > 172800 {
+                let renewed: YaniTokenResponse = try await request("/profile/token", token: token)
+                return try await accept(renewed.response.token)
+            }
+            let response: YaniProfileResponse = try await request("/profile", token: token)
+            return response.response
+        } catch let error as YaniAPIError where error.status == 401 { clearSession(); throw error }
+    }
+    static func logout() async { if let token = SessionKeychain.read() { let _: YaniDiscardResponse? = try? await request("/profile/logout", method: "POST", token: token) }; clearSession() }
+    static func clearSession() { SessionKeychain.clear(); UserDefaults.standard.removeObject(forKey: "yaniNickname"); UserDefaults.standard.set(UUID().uuidString, forKey: "yaniRevision") }
+}
+struct YaniAccountView: View {
+    @State private var login = ""
+    @State private var password = ""
+    @State private var busy = false
+    @State private var message: String?
+    @State private var web = false
+    @AppStorage("yaniNickname") private var nickname = ""
+    @State private var authorized = SessionKeychain.read() != nil
+    var body: some View {
+        Form {
+            Section("Аккаунт YummyAnime") {
+                if authorized {
+                    Label(nickname.isEmpty ? "YummyAnime" : nickname, systemImage: "person.crop.circle.fill")
+                    Button("Выйти", role: .destructive) { Task { busy = true; await YaniAPI.logout(); authorized = false; busy = false } }.disabled(busy)
+                } else {
+                    Text("Используется тот же аккаунт, что на сайте YummyAnime. Сессия сохраняется в Keychain.").font(.footnote).foregroundStyle(.secondary)
+                    Button("Войти через сайт YummyAnime") { web = true }
+                    TextField("Логин или email", text: $login).textInputAutocapitalization(.never).autocorrectionDisabled().textContentType(.username)
+                    SecureField("Пароль", text: $password).textContentType(.password)
+                    Button("Войти по логину и паролю") { Task { await signIn() } }.disabled(busy || login.isEmpty || password.isEmpty)
+                }
+                if busy { ProgressView() }
+                if let message { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            }
+            Section { Link("Открыть официальный сайт", destination: URL(string: "https://ru.yummyani.me/")!) }
+        }.navigationTitle("YummyAnime").sheet(isPresented: $web) {
+            NavigationStack {
+                YaniSiteLogin { token in
+                    guard !busy else { return }; busy = true
+                    Task { do { let profile = try await YaniAPI.accept(token); nickname = profile.nickname ?? "YummyAnime"; authorized = true; web = false; message = nil } catch { message = error.localizedDescription }; busy = false }
+                }.safeAreaInset(edge: .top) { Text("Войдите на официальном сайте. После успешного входа приложение проверит сессию через API и сохранит её в Keychain.").font(.footnote).padding().background(.ultraThinMaterial) }
+                .navigationTitle("Вход на сайте").navigationBarTitleDisplayMode(.inline).toolbar { Button("Закрыть") { web = false } }
+            }
+        }.task { do { if let profile = try await YaniAPI.restore() { nickname = profile.nickname ?? "YummyAnime"; authorized = true } else { authorized = false } } catch { authorized = SessionKeychain.read() != nil; message = error.localizedDescription } }.onDisappear { password = "" }
+    }
+    func signIn() async {
+        busy = true; message = nil
+        defer { busy = false }
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["login": login, "password": password, "need_json": true])
+            let result: YaniTokenResponse = try await YaniAPI.request("/profile/login", method: "POST", body: body)
+            let profile = try await YaniAPI.accept(result.response.token)
+            nickname = profile.nickname ?? login; password = ""; authorized = true
+        } catch { message = "\(error.localizedDescription). Если сайт требует капчу, используйте вход через сайт." }
+    }
+}
+struct YaniSiteLogin: UIViewRepresentable {
+    let accept: (String) -> Void
+    func makeCoordinator() -> Coordinator { Coordinator(accept: accept) }
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration(); configuration.websiteDataStore = .nonPersistent()
+        configuration.userContentController.add(context.coordinator, name: "yaniSignIn")
+        // Observe only successful authentication responses from the service in the
+        // user-requested login window. Passwords/cookies/localStorage are never read.
+        let script = #"""
+        (() => {
+          if (!['ru.yummyani.me','yummyani.me','api.yani.tv'].includes(location.hostname)) return;
+          function authenticationURL(raw) { try { const u = new URL(raw, location.href); return u.protocol === 'https:' && u.hostname === 'api.yani.tv' && ['/profile/login','/profile/token'].includes(u.pathname); } catch (_) { return false; } }
+          function receive(data) { const value = data && data.response && data.response.token; if (typeof value === 'string' && value.length > 0 && value.length <= 16384) window.webkit.messageHandlers.yaniSignIn.postMessage(value); }
+          const original = window.fetch;
+          window.fetch = async function(...args) { const response = await original.apply(this,args); if (response.ok && authenticationURL(response.url)) response.clone().json().then(receive).catch(()=>{}); return response; };
+          const open = XMLHttpRequest.prototype.open;
+          XMLHttpRequest.prototype.open = function(...args) { this.addEventListener('load',function() { if (this.status >= 200 && this.status < 300 && authenticationURL(this.responseURL)) { try { receive(this.responseType === 'json' ? this.response : JSON.parse(this.responseText)); } catch (_) {} } }); return open.apply(this,args); };
+        })();
+        """#
+        configuration.userContentController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        let view = WKWebView(frame: .zero, configuration: configuration); view.navigationDelegate = context.coordinator
+        view.load(URLRequest(url: URL(string: "https://ru.yummyani.me/")!)); return view
+    }
+    func updateUIView(_ view: WKWebView, context: Context) {}
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) { view.stopLoading(); view.configuration.userContentController.removeScriptMessageHandler(forName: "yaniSignIn") }
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        let accept: (String) -> Void
+        init(accept: @escaping (String) -> Void) { self.accept = accept }
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.frameInfo.isMainFrame, ["ru.yummyani.me", "yummyani.me", "api.yani.tv"].contains(message.frameInfo.securityOrigin.host), let token = message.body as? String, !token.isEmpty, token.utf8.count <= 16384 else { return }
+            accept(token)
+        }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) { decisionHandler(navigationAction.request.url?.scheme == "https" || navigationAction.request.url?.scheme == "about" ? .allow : .cancel) }
+    }
+}
 struct RootView: View {
     var body: some View {
         TabView {
@@ -104,6 +293,10 @@ struct CoverCard: View {
     }
 }
 struct CatalogView: View {
+    @State private var offset = 0
+    @State private var more = true
+    @State private var fetchingMore = false
+    @AppStorage("yaniRevision") private var sessionRevision = ""
     @State private var items: [Anime] = []
     @State private var error: String?
     @AppStorage(HistoryStore.storageKey) private var historyData = Data()
@@ -114,7 +307,7 @@ struct CatalogView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 4) { Text("ANIME / APP").font(.caption.weight(.bold)).tracking(2).foregroundStyle(.purple); Text("Сегодня в кадре").font(.title2.bold()) }
-                        Spacer(); Image(systemName: "sparkles").font(.title2).foregroundStyle(.purple)
+                        Spacer(); NavigationLink { YaniAccountView() } label: { Image(systemName: "person.crop.circle").font(.title2).foregroundStyle(.purple) }
                     }.padding(.horizontal)
                     if let last = history.first {
                         NavigationLink { DetailView(id: last.id) } label: {
@@ -125,19 +318,21 @@ struct CatalogView: View {
                     if items.isEmpty && error == nil { ProgressView().frame(maxWidth: .infinity).padding() }
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
-                            HStack { VStack(alignment: .leading, spacing: 3) { Text("Свежие релизы").font(.title2.bold()); Text("Обновления AniLibria").font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(.horizontal)
+                            HStack { VStack(alignment: .leading, spacing: 3) { Text("Открывайте аниме").font(.title2.bold()); Text("Каталог YummyAnime").font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(.horizontal)
                             ScrollView(.horizontal, showsIndicators: false) { LazyHStack(alignment: .top, spacing: 12) { ForEach(Array(items.prefix(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) } }.padding(.horizontal) }
                         }
                         Text("Ещё в каталоге").font(.title2.bold()).padding(.horizontal)
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .center, spacing: 18) {
                             ForEach(Array(items.dropFirst(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) }
                         }.padding(.horizontal)
+                        if more { Button(fetchingMore ? "Загрузка…" : "Загрузить ещё") { Task { await loadMore() } }.disabled(fetchingMore).buttonStyle(.bordered).frame(maxWidth: .infinity) }
                     }
                 }.padding(.top, 12).padding(.bottom, 30)
-            }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.hidden, for: .navigationBar).task { await load() }.refreshable { await load() }
+            }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.hidden, for: .navigationBar).task(id: sessionRevision) { await load() }.refreshable { await load() }
         }
     }
-    func load() async { do { items = try await Libria().latest(); error = nil } catch { self.error = "Не удалось загрузить каталог: \(error.localizedDescription)" } }
+    func loadMore() async { fetchingMore = true; defer { fetchingMore = false }; do { let page = try await YaniAPI.catalog(offset: offset); offset += page.count; more = page.count == 30; let ids = Set(items.map(\.id)); items.append(contentsOf: page.filter { !ids.contains($0.id) }); error = nil } catch { self.error = error.localizedDescription } }
+    func load() async { do { items = try await YaniAPI.catalog(); offset = items.count; more = items.count == 30; error = nil } catch { self.error = "Не удалось загрузить каталог: \(error.localizedDescription)" } }
 }
 struct SearchView: View {
     @State private var query = ""
@@ -162,7 +357,7 @@ struct SearchView: View {
              .task(id: query) {
                  guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { items = []; loading = false; error = nil; return }
                  loading = true
-                 do { try await Task.sleep(for: .milliseconds(400)); let found = try await Libria().search(query); guard !Task.isCancelled else { return }; items = found; error = nil; loading = false }
+                 do { try await Task.sleep(for: .milliseconds(400)); let found = try await YaniAPI.catalog(query: query); guard !Task.isCancelled else { return }; items = found; error = nil; loading = false }
                  catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription; loading = false }
              }
         }
@@ -181,7 +376,7 @@ struct DetailView: View {
                     ZStack(alignment: .bottomLeading) {
                         AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(maxWidth: .infinity).frame(height: 330).clipped()
                         LinearGradient(colors: [.clear, .black.opacity(0.35), Color(red: 0.045, green: 0.04, blue: 0.075)], startPoint: .top, endPoint: .bottom)
-                        VStack(alignment: .leading, spacing: 6) { Text("ANILIBRIA").font(.caption.bold()).tracking(2).foregroundStyle(.purple); Text(anime.name.main).font(.largeTitle.bold()).lineLimit(3); if let year = anime.year { Text("\(String(year))  •  \(anime.episodes?.count ?? 0) серий").font(.subheadline).foregroundStyle(.secondary) } }.padding(20)
+                        VStack(alignment: .leading, spacing: 6) { Text(anime.id < 0 ? "YUMMYANIME" : "ANILIBRIA").font(.caption.bold()).tracking(2).foregroundStyle(.purple); Text(anime.name.main).font(.largeTitle.bold()).lineLimit(3); if let year = anime.year { Text("\(String(year))  •  \(anime.episodes?.count ?? 0) серий").font(.subheadline).foregroundStyle(.secondary) } }.padding(20)
                     }.frame(height: 330).clipped()
                     VStack(alignment: .leading, spacing: 20) {
                         if let last = history.first(where: { $0.id == anime.id }), let episode = anime.episodes?.first(where: { $0.id == last.episodeID }) {
@@ -192,7 +387,7 @@ struct DetailView: View {
                         LibraryControls(anime: anime)
                         Text(anime.description ?? "Описание отсутствует").font(.subheadline).foregroundStyle(.secondary)
                         YaniSourcesView(anime: anime)
-                        HStack { Text("Серии").font(.title2.bold()); Spacer(); Text("AniLibria").font(.caption).foregroundStyle(.purple) }
+                        if !(anime.episodes ?? []).isEmpty { HStack { Text("Серии").font(.title2.bold()); Spacer(); Text("AniLibria").font(.caption).foregroundStyle(.purple) } }
                         ForEach(anime.episodes ?? []) { episode in
                             NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: {
                                 HStack(spacing: 14) { Image(systemName: "play.fill").frame(width: 42, height: 42).background(.purple.opacity(0.24), in: RoundedRectangle(cornerRadius: 12)); VStack(alignment: .leading, spacing: 4) { Text("Серия \((episode.ordinal ?? 0).formatted())").font(.subheadline.bold()); if let name = episode.name { Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(1) } }; Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary) }.padding(12).background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
@@ -201,7 +396,7 @@ struct DetailView: View {
                     }.padding(.horizontal, 20)
                 }.padding(.bottom, 30)
             } else if let error { ContentUnavailableView("Источник недоступен", systemImage: "wifi.exclamationmark", description: Text(error)) } else { ProgressView().padding() }
-        }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline).task { do { anime = try await Libria().release(id) } catch { self.error = error.localizedDescription } }
+        }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline).task { do { anime = id < 0 ? try await YaniAPI.detail(-id) : try await Libria().release(id) } catch { self.error = error.localizedDescription } }
     }
 }
 struct YaniSearchResponse: Decodable {
@@ -238,6 +433,7 @@ struct YaniProvider {
         return try JSONDecoder().decode(T.self, from: data)
     }
     func videos(for anime: Anime) async throws -> [YaniVideo] {
+        if anime.id < 0 { return try await YaniAPI.videos(-anime.id) }
         guard let malID = anime.mal?.id, malID > 0 else { throw YaniError.noIdentifier }
         var components = URLComponents(string: "https://api.yani.tv/anime")!
         components.queryItems = [URLQueryItem(name: "q", value: anime.name.main), URLQueryItem(name: "limit", value: "50")]
@@ -275,12 +471,15 @@ struct YaniSourcesView: View {
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { Text("Другие озвучки").font(.title2.bold()); Spacer(); if loading { ProgressView() } }
+            HStack { Text(anime.id < 0 ? "Озвучки и серии" : "Другие озвучки").font(.title2.bold()); Spacer(); if loading { ProgressView() } }
             Text("Озвучки · Aksor и CVH").font(.caption).foregroundStyle(.secondary)
             if !loaded && !loading { Button("Найти озвучки") { Task { await load() } }.buttonStyle(.bordered) }
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
             if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let video = videos.first(where: { "yani-\($0.id)" == last.episodeID && $0.supportsNativePlayback }) {
                 NavigationLink { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: videos.filter { $0.supportsNativePlayback }) } label: { Label("Продолжить · \(video.voiceName) · серия \(video.number ?? "—")", systemImage: "play.fill").font(.subheadline.bold()).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
+            }
+            if anime.id < 0, let first = videos.filter({ $0.supportsNativePlayback }).sorted(by: { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending }).first(where: { preferred.isEmpty || $0.groupKey == preferred }) ?? videos.first(where: { $0.supportsNativePlayback }) {
+                NavigationLink { MultiSourcePlayerScreen(sourceAnime: anime, video: first, videos: videos.filter { $0.supportsNativePlayback }) } label: { Label("Смотреть · \(first.voiceName)", systemImage: "play.fill").font(.headline).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
             }
             DisclosureGroup("Выбрать озвучку · \(groups.count)") {
             ForEach(groups, id: \.key) { group in
@@ -787,7 +986,7 @@ struct SettingsView: View {
                     Text("Импорт заменяет библиотеку, историю и сохранённые позиции.").font(.footnote).foregroundStyle(.secondary)
                     if let message { Text(message).font(.footnote) }
                 }
-                Section("Источник") { Text("AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
+                Section("Источник") { NavigationLink("Аккаунт YummyAnime") { YaniAccountView() }; Text("Каталог: YummyAnime · видео: Aksor, CVH, AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
             }.navigationTitle("Настройки")
             .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json, defaultFilename: "AnimeApp-backup") { result in
                 switch result { case .success: message = "Экспорт завершён."; case .failure(let error): message = "Ошибка экспорта: \(error.localizedDescription)" }
