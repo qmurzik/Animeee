@@ -4,7 +4,8 @@ final class PlaybackUITests: XCTestCase {
     override func setUp() { super.setUp(); continueAfterFailure = false; XCUIDevice.shared.orientation = .portrait }
     private func tap(_ element: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertTrue(element.waitForExistence(timeout: 30), "Missing control: \(element)", file: file, line: line)
-        XCTAssertTrue(element.isHittable, "Control is not hittable: \(element)", file: file, line: line)
+        let hittable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in element.isHittable }, object: element)
+        XCTAssertEqual(XCTWaiter.wait(for: [hittable], timeout: 10), .completed, "Control is not hittable: \(element)", file: file, line: line)
         // Dispatch an actual coordinate tap through the system hit-testing path.
         element.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
     }

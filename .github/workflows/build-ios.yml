@@ -89,7 +89,12 @@ jobs:
           SIMCTL_CHILD_ANIMEAPP_SCREEN=detail xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot detail.png
+      - name: Tap fullscreen controls and check the installed icon
+        timeout-minutes: 15
+        run: |
+          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeAppUITests -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild -resultBundlePath UITests.xcresult -parallel-testing-enabled NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
       - name: Check native video output on simulator
+        if: ${{ !cancelled() }}
         run: |
           for source in aksor cvh; do
             landscape=0
@@ -114,10 +119,6 @@ jobs:
           SIMCTL_CHILD_ANIMEAPP_LANDSCAPE=0 SIMCTL_CHILD_ANIMEAPP_PANEL=voices SIMCTL_CHILD_ANIMEAPP_PROBE=aksor xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot voices.png
-      - name: Tap fullscreen controls and check the installed icon
-        timeout-minutes: 15
-        run: |
-          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeAppUITests -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild -resultBundlePath UITests.xcresult -parallel-testing-enabled NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
