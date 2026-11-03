@@ -1,0 +1,19 @@
+name: AnimeApp
+options:
+  deploymentTarget:
+    iOS: '18.0'
+targets:
+  AnimeApp:
+    type: application
+    platform: iOS
+    sources: [AnimeApp]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer
+        SWIFT_VERSION: '5.0'
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: AnimeApp
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        TARGETED_DEVICE_FAMILY: '1'
+        IPHONEOS_DEPLOYMENT_TARGET: '18.0'

@@ -1,0 +1,28 @@
+name: Build iOS
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install xcodegen
+      - run: xcodegen generate
+      - run: xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+      - name: Package and validate
+        run: |
+          set -euxo pipefail
+          APP=build/Build/Products/Release-iphoneos/AnimeApp.app
+          test -f "$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = 18.0
+          lipo -verify_arch arm64 "$APP/AnimeApp"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry AnimeApp-unsigned.ipa Payload
+          unzip -t AnimeApp-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AnimeApp-unsigned
+          path: AnimeApp-unsigned.ipa
