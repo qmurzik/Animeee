@@ -21,7 +21,7 @@ IPA: https://github.com/qmurzik/Animeee/releases/download/build-40/AnimeApp-unsi
 
 Оба UI-теста завершились без ошибок. Второй тест проверяет установленную иконку в SpringBoard. Снимки панелей и иконки экспортированы из xcresult и визуально просмотрены; изображения не вращались и не ретушировались.
 
-Снимки: [качество](https://github.com/qmurzik/Animeee/releases/download/build-40/landscape-quality.png), [озвучки](https://github.com/qmurzik/Animeee/releases/download/build-40/landscape-voices.png), [серии](https://github.com/qmurzik/Animeee/releases/download/build-40/landscape-episodes.png), [портретные настройки](https://github.com/qmurzik/Animeee/releases/download/build-40/portrait-settings.png).
+Снимки: [качество](https://github.com/qmurzik/Animeee/blob/main/docs/evidence/0.7/landscape-quality.png), [озвучки](https://github.com/qmurzik/Animeee/blob/main/docs/evidence/0.7/landscape-voices.png), [серии](https://github.com/qmurzik/Animeee/blob/main/docs/evidence/0.7/landscape-episodes.png), [портретные настройки](https://github.com/qmurzik/Animeee/blob/main/docs/evidence/0.7/portrait-settings.png).
 
 Полные UI-результаты находятся в артефакте `fullscreen-ui-tests` этого запуска Actions. Экспорт снимков с исходным manifest: https://github.com/qmurzik/Animeee/releases/download/build-40/ui-controls.zip
 
@@ -29,7 +29,7 @@ IPA: https://github.com/qmurzik/Animeee/releases/download/build-40/AnimeApp-unsi
 
 Создана оригинальная иконка и добавлен AppIcon asset catalog: размеры iPhone 20/29/40/60 pt для 2×/3× и 1024×1024 для каталога. PNG непрозрачные. В скачанной IPA подтверждены `CFBundleIcons → CFBundlePrimaryIcon → CFBundleIconName = AppIcon`, файл иконки и `Assets.car`.
 
-[Установленная иконка в App Library симулятора](https://github.com/qmurzik/Animeee/releases/download/build-40/installed-app-icon.png) · [исходное изображение 1024×1024](https://github.com/qmurzik/Animeee/releases/download/build-40/AppIcon.png).
+[Установленная иконка в App Library симулятора](https://github.com/qmurzik/Animeee/blob/main/docs/evidence/0.7/installed-app-icon.png) · [исходное изображение 1024×1024](https://github.com/qmurzik/Animeee/blob/build-40/AnimeApp/Assets.xcassets/AppIcon.appiconset/icon-1024%401x.png).
 
 ## Другие источники
 

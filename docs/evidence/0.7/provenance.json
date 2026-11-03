@@ -1,0 +1,62 @@
+{
+  "workflow": "https://github.com/qmurzik/Animeee/actions/runs/41665230065",
+  "originalAttachments": [
+    {
+      "attachments": [
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "158D96D4-5120-4747-B79C-AD60DF15D10A",
+          "deviceName": "AnimeApp iPhone XS",
+          "exportedFileName": "8B3D4656-7E06-4F30-B6A1-B9BF86857B44.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "portrait-settings_0_9CE2ADCA-8636-462E-A528-C2D4A9AACCDD.png",
+          "timestamp": 1793720678.411
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "158D96D4-5120-4747-B79C-AD60DF15D10A",
+          "deviceName": "AnimeApp iPhone XS",
+          "exportedFileName": "2B11CEF6-DFA7-40C8-9318-F8DDF3BD4FA8.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "landscape-episodes_0_859CDE04-C0DD-43A5-82B3-5F7AA49708B7.png",
+          "timestamp": 1793720653.33
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "158D96D4-5120-4747-B79C-AD60DF15D10A",
+          "deviceName": "AnimeApp iPhone XS",
+          "exportedFileName": "1CB056A3-F805-41C4-AC73-F6CCEEF0E93B.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "landscape-voices_0_A2A8B887-1B44-4084-8D9E-58ABE957CB88.png",
+          "timestamp": 1793720644.667
+        },
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "158D96D4-5120-4747-B79C-AD60DF15D10A",
+          "deviceName": "AnimeApp iPhone XS",
+          "exportedFileName": "D9DE059A-7B46-4D43-A201-DA76962CE28C.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "landscape-quality_0_9D837DF4-E4D7-45E4-AC65-789FB35AD1A2.png",
+          "timestamp": 1793720633.155
+        }
+      ],
+      "testIdentifier": "PlaybackUITests/testFullscreenQualityVoicesEpisodesAndPortraitControls()",
+      "testIdentifierURL": "test://com.apple.xcode/AnimeApp/AnimeAppUITests/PlaybackUITests/testFullscreenQualityVoicesEpisodesAndPortraitControls"
+    },
+    {
+      "attachments": [
+        {
+          "configurationName": "Test Scheme Action",
+          "deviceId": "158D96D4-5120-4747-B79C-AD60DF15D10A",
+          "deviceName": "AnimeApp iPhone XS",
+          "exportedFileName": "77222E9D-28BD-41D6-A3A1-0D6FA52562D2.png",
+          "isAssociatedWithFailure": false,
+          "suggestedHumanReadableName": "installed-app-icon_0_BE8F327C-124F-4D45-8453-F1E598080DF4.png",
+          "timestamp": 1793720688.831
+        }
+      ],
+      "testIdentifier": "PlaybackUITests/testInstalledAppIconOnSpringBoard()",
+      "testIdentifierURL": "test://com.apple.xcode/AnimeApp/AnimeAppUITests/PlaybackUITests/testInstalledAppIconOnSpringBoard"
+    }
+  ]
+}
