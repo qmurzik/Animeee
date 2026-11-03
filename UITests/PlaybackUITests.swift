@@ -57,3 +57,21 @@ final class PlaybackUITests: XCTestCase {
         snapshot("installed-app-icon")
     }
 }
+
+final class SourceSettingsUITests: XCTestCase {
+    func testSourceNavigationAndMirrorValidation() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication(); app.launch()
+        app.tabBars.buttons["Настройки"].tap()
+        let sources = app.buttons["Источники и зеркала"]
+        XCTAssertTrue(sources.waitForExistence(timeout: 15)); sources.tap()
+        let animego = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "AnimeGO")).firstMatch
+        XCTAssertTrue(animego.waitForExistence(timeout: 10)); animego.tap()
+        let field = app.textFields["mirror.site"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("http://invalid.example")
+        if !app.buttons["mirror.save"].isHittable { app.swipeUp() }; app.buttons["mirror.save"].tap()
+        XCTAssertTrue(app.staticTexts["Нужен HTTPS-домен без пути, параметров, логина и пароля."].waitForExistence(timeout: 10))
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = "source-mirror-validation"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+}

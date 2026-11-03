@@ -822,7 +822,7 @@ struct SettingsView: View {
                     Text("Импорт заменяет библиотеку, историю и сохранённые позиции.").font(.footnote).foregroundStyle(.secondary)
                     if let message { Text(message).font(.footnote) }
                 }
-                Section("Источник") { NavigationLink("Аккаунт YummyAnime") { YaniAccountView() }; Text("Каталог: YummyAnime · видео: Aksor, CVH, AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
+                Section("Источник") { NavigationLink("Источники и зеркала") { SourcesSettingsView() }; NavigationLink("Каталоги Shikimori, AnimeLIB, AnimeGO") { SourceSearchView() }; NavigationLink("Аккаунт YummyAnime") { YaniAccountView() }; Text("Каталог: YummyAnime · видео: Aksor, CVH, AniLibria"); Text("Доступность зависит от источника и сети.").font(.footnote).foregroundStyle(.secondary) }
             }.navigationTitle("Настройки")
             .fileExporter(isPresented: $exporting, document: exportDocument, contentType: .json, defaultFilename: "AnimeApp-backup") { result in
                 switch result { case .success: message = "Экспорт завершён."; case .failure(let error): message = "Ошибка экспорта: \(error.localizedDescription)" }

@@ -119,6 +119,7 @@ struct SearchView: View {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Какую историю\nпосмотрим?").font(.system(size: 32, weight: .bold, design: .rounded))
                             Text("Ищи по русскому, английскому или японскому названию.").font(.subheadline).foregroundStyle(Cinema.muted)
+                            NavigationLink { SourceSearchView() } label: { Label("Shikimori · AnimeLIB · AnimeGO", systemImage: "rectangle.stack.badge.play").font(.subheadline.bold()) }
                             Text("БЫСТРЫЙ ПОИСК").font(.caption2.bold()).tracking(2).foregroundStyle(Cinema.muted).padding(.top, 20)
                             ForEach(["Наруто", "Ван-Пис", "Магическая битва", "Провожающая в последний путь Фрирен"], id: \.self) { title in
                                 Button { query = title } label: { HStack { Text(title).foregroundStyle(.white); Spacer(); Image(systemName: "arrow.up.left").foregroundStyle(Cinema.accent) }.padding(17).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 15)) }
@@ -133,7 +134,7 @@ struct SearchView: View {
                         }
                     }
                 }.padding(20)
-            }.background(Cinema.background).navigationTitle("Поиск").searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название аниме")
+            }.background(Cinema.background).navigationTitle("Поиск").toolbar { NavigationLink { SourceSearchView(query: query) } label: { Image(systemName: "rectangle.stack.badge.play") }.accessibilityLabel("Другие источники") }.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название аниме")
             .task(id: query) {
                 let requested = query.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !requested.isEmpty else { items = []; loading = false; error = nil; return }
@@ -182,6 +183,7 @@ struct DetailView: View {
                         if loading { HStack { ProgressView(); Text("Ищем доступные серии…").font(.subheadline).foregroundStyle(Cinema.muted) }.padding(.vertical) }
                         if let error { VStack(alignment: .leading, spacing: 8) { Text(error).font(.subheadline).foregroundStyle(Cinema.muted); Button("Повторить загрузку серий") { Task { await loadVideos(anime) } }; if SessionKeychain.read() == nil { Button("Войти в YummyAnime") { accountSheet = true } } }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }
                         if let episode = anime.episodes?.first(where: { !$0.streams.isEmpty }) { NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Смотреть AniLibria", systemImage: "play.fill").font(.headline).padding() } }
+                        NavigationLink { SourceSearchView(query: anime.name.main) } label: { Label("Другие источники и озвучки", systemImage: "rectangle.stack.badge.play").font(.headline) }
                         LibraryControls(anime: anime)
                         if let shikimoriID = anime.shikimoriID, shikimoriID > 0 { ShikimoriVideosView(animeID: shikimoriID) }
                         VStack(alignment: .leading, spacing: 10) {
