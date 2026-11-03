@@ -811,19 +811,60 @@ struct MultiSourcePlayerScreen: View {
             List {
                 switch selection {
                 case .episodes:
-                    Section(model.selected.voiceName) { ForEach(model.episodes) { video in Button { model.select(video); panel = nil } label: { HStack { Label("Серия \(video.number ?? "—")", systemImage: video.id == model.selected.id ? "play.circle.fill" : "play.circle"); Spacer(); if video.id == model.selected.id { Image(systemName: "checkmark") } }.padding(.vertical, 7) } } }
+                    Section(model.selected.voiceName) {
+                        ForEach(model.episodes) { video in
+                            Button { model.select(video); panel = nil } label: {
+                                HStack {
+                                    Label("Серия \(video.number ?? "—")", systemImage: video.id == model.selected.id ? "play.circle.fill" : "play.circle")
+                                    Spacer()
+                                    if video.id == model.selected.id { Image(systemName: "checkmark") }
+                                }.padding(.vertical, 7)
+                            }
+                        }
+                    }
                 case .voices:
                     Section("Серия \(model.selected.number ?? "—")") {
                         ForEach(model.voices, id: \.self) { voice in
                             let available = model.videos.contains { $0.groupKey == voice && episodeIdentity($0.number) == episodeIdentity(model.selected.number) }
-                            Button { model.chooseVoice(voice); panel = nil } label: { VStack(alignment: .leading, spacing: 5) { HStack { Text(voice); Spacer(); if voice == model.selected.groupKey { Image(systemName: "checkmark") } }; if !available { Text("Эта серия ещё недоступна").font(.caption).foregroundStyle(.secondary) } }.disabled(!available)
+                            Button { model.chooseVoice(voice); panel = nil } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text(voice); Spacer()
+                                        if voice == model.selected.groupKey { Image(systemName: "checkmark") }
+                                    }
+                                    if !available { Text("Эта серия ещё недоступна").font(.caption).foregroundStyle(.secondary) }
+                                }
+                            }.disabled(!available)
                         }
                     }
                 case .settings:
-                    Section("Качество") { ForEach(model.choices) { choice in Button { model.changeQuality(choice); panel = nil } label: { HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } } } } }
-                    Section("Скорость") { Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.rate = $0; model.player.rate = $0 })) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) } } }
-                    Section("Звук") { ForEach(model.audioTracks, id: \.id) { track in Button { model.player.currentAudioTrackIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentAudioTrackIndex == track.id { Image(systemName: "checkmark") } } } } }
-                    Section("Субтитры") { if model.subtitleTracks.isEmpty { Text("Источник не предоставил отдельные субтитры").foregroundStyle(.secondary) }; ForEach(model.subtitleTracks, id: \.id) { track in Button { model.player.currentVideoSubTitleIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentVideoSubTitleIndex == track.id { Image(systemName: "checkmark") } } } } }
+                    Section("Качество") {
+                        ForEach(model.choices) { choice in
+                            Button { model.changeQuality(choice); panel = nil } label: {
+                                HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } }
+                            }
+                        }
+                    }
+                    Section("Скорость") {
+                        Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.rate = $0; model.player.rate = $0 })) {
+                            ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) }
+                        }
+                    }
+                    Section("Звук") {
+                        ForEach(model.audioTracks, id: \.id) { track in
+                            Button { model.player.currentAudioTrackIndex = track.id; model.objectWillChange.send() } label: {
+                                HStack { Text(track.name); Spacer(); if model.player.currentAudioTrackIndex == track.id { Image(systemName: "checkmark") } }
+                            }
+                        }
+                    }
+                    Section("Субтитры") {
+                        if model.subtitleTracks.isEmpty { Text("Источник не предоставил отдельные субтитры").foregroundStyle(.secondary) }
+                        ForEach(model.subtitleTracks, id: \.id) { track in
+                            Button { model.player.currentVideoSubTitleIndex = track.id; model.objectWillChange.send() } label: {
+                                HStack { Text(track.name); Spacer(); if model.player.currentVideoSubTitleIndex == track.id { Image(systemName: "checkmark") } }
+                            }
+                        }
+                    }
                 }
             }.navigationTitle(selection == .episodes ? "Серии" : selection == .voices ? "Озвучки и источники" : "Настройки плеера")
              .navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { panel = nil } }
