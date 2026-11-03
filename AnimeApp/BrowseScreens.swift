@@ -1,12 +1,20 @@
 import SwiftUI
 
 struct RootView: View {
+    init() {
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = UIColor(Cinema.background)
+        appearance.shadowColor = UIColor.white.withAlphaComponent(0.06)
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
     var body: some View {
         TabView {
-            CatalogView().tabItem { Label("Главная", systemImage: "house.fill") }
-            SearchView().tabItem { Label("Поиск", systemImage: "magnifyingglass") }
-            LibraryView().tabItem { Label("Моё", systemImage: "bookmark.fill") }
-            SettingsView().tabItem { Label("Настройки", systemImage: "slider.horizontal.3") }
+            CatalogView().toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar).tabItem { Label("Главная", systemImage: "house.fill") }
+            SearchView().toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar).tabItem { Label("Поиск", systemImage: "magnifyingglass") }
+            LibraryView().toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar).tabItem { Label("Моё", systemImage: "bookmark.fill") }
+            SettingsView().toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar).tabItem { Label("Настройки", systemImage: "slider.horizontal.3") }
         }.tint(Cinema.accent).statusBarHidden(false).toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
     }
 }
@@ -30,6 +38,7 @@ struct CatalogView: View {
     private var history: [HistoryEntry] { (try? JSONDecoder().decode([HistoryEntry].self, from: historyData)) ?? [] }
     var body: some View {
         NavigationStack {
+            GeometryReader { geometry in
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     HStack {
@@ -59,10 +68,12 @@ struct CatalogView: View {
                         }.padding(.horizontal, 20)
                         if more { Button { Task { await loadMore() } } label: { HStack { if fetching { ProgressView() }; Text(fetching ? "Загружаем…" : "Показать ещё") }.frame(maxWidth: .infinity).padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }.disabled(fetching).padding(.horizontal, 20) }
                     }
-                }.padding(.top, 8).padding(.bottom, 28)
-            }.background(Cinema.background).toolbar(.hidden, for: .navigationBar).refreshable { await load() }.task(id: revision) { await load() }
+                }.padding(.top, 8 + max(0, windowTopInset - geometry.frame(in: .global).minY)).padding(.bottom, 28)
+            }.background(Cinema.background).toolbar(.hidden, for: .navigationBar).refreshable { await load() }.task(id: revision) { await load() }.statusBarHidden(false)
+            }
         }
     }
+    private var windowTopInset: CGFloat { UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.flatMap(\.windows).first(where: \.isKeyWindow)?.safeAreaInsets.top ?? 44 }
     private func load() async { do { let page = try await YaniAPI.catalog(); guard !Task.isCancelled else { return }; items = page; more = page.count == 30; error = nil } catch { self.error = "Не удалось загрузить каталог. \(error.localizedDescription)" } }
     private func loadMore() async { guard !fetching else { return }; fetching = true; defer { fetching = false }; do { let page = try await YaniAPI.catalog(offset: items.count); let ids = Set(items.map(\.id)); items.append(contentsOf: page.filter { !ids.contains($0.id) }); more = page.count == 30; error = nil } catch { self.error = error.localizedDescription } }
 }

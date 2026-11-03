@@ -18,6 +18,7 @@ struct MultiSourcePlayerScreen: View {
     @State private var dragStart: Double = 0
     @State private var brightnessStart: CGFloat = 0.5
     @State private var volumeStart: Int32 = 100
+    @State private var pinching = false
     @State private var zoom: CGFloat = 1
     @State private var zoomStart: CGFloat = 1
     @State private var originalBrightness: CGFloat?
@@ -115,8 +116,8 @@ struct MultiSourcePlayerScreen: View {
                 if locked { VStack { Spacer(); Button { locked = false; touch() } label: { Label("Разблокировать", systemImage: "lock.fill").font(.subheadline.bold()).padding(13).background(.black.opacity(0.75), in: Capsule()) }.padding(.bottom, 20) } }
                 if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(15).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
             }.clipped().simultaneousGesture(MagnificationGesture().onChanged { value in
-                guard !locked else { return }; zoom = max(1, min(2, zoomStart * value)); feedback = "Масштаб " + Double(zoom).formatted(.number.precision(.fractionLength(1))) + "×"
-            }.onEnded { _ in zoomStart = zoom; feedback = nil; touch() })
+                guard !locked else { return }; pinching = true; dragMode = nil; scrub = nil; zoom = max(1, min(2, zoomStart * value)); feedback = "Масштаб " + Double(zoom).formatted(.number.precision(.fractionLength(1))) + "×"
+            }.onEnded { _ in zoomStart = zoom; pinching = false; feedback = nil; touch() })
         }
     }
     private func tapZone(_ delta: Double) -> some View {
@@ -236,7 +237,7 @@ struct MultiSourcePlayerScreen: View {
     private func touch() { controls = true; interaction += 1 }
     private func jump(_ delta: Double) { guard !locked, model.seekable else { return }; model.seek(model.seconds + delta); feedback = delta > 0 ? "+10 сек" : "−10 сек"; interaction += 1 }
     private func drag(_ value: DragGesture.Value, size: CGSize) {
-        guard !locked, model.error == nil else { return }
+        guard !locked, !pinching, model.error == nil else { return }
         if dragMode == nil {
             dragStart = model.seconds
             brightnessStart = scene?.screen.brightness ?? 0.5
@@ -259,7 +260,7 @@ struct MultiSourcePlayerScreen: View {
         }
         controls = false; interaction += 1
     }
-    private func endDrag() { if dragMode == "seek", let scrub { model.seek(scrub) }; scrub = nil; dragMode = nil; feedback = nil; touch() }
+    private func endDrag() { guard !pinching else { dragMode = nil; scrub = nil; return }; if dragMode == "seek", let scrub { model.seek(scrub) }; scrub = nil; dragMode = nil; feedback = nil; touch() }
     private func rotate(_ orientation: UIInterfaceOrientationMask) {
         guard let scene else { return }
         scene.windows.first(where: \.isKeyWindow)?.rootViewController?.setNeedsUpdateOfSupportedInterfaceOrientations()
