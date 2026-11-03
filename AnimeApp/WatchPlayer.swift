@@ -90,11 +90,16 @@ struct MultiSourcePlayerScreen: View {
         GeometryReader { video in
             ZStack {
                 Color.black
-                VLCSurface(player: model.player).scaleEffect(zoom)
+                VLCSurface(player: model.player).scaleEffect(zoom).allowsHitTesting(false)
                 HStack(spacing: 0) {
                     tapZone(-10)
                     tapZone(10)
                 }.gesture(DragGesture(minimumDistance: 18).onChanged { value in drag(value, size: video.size) }.onEnded { _ in endDrag() })
+                 .simultaneousGesture(MagnificationGesture().onChanged { value in
+                     guard !locked else { return }; pinching = true; dragMode = nil; scrub = nil; zoom = max(1, min(2, zoomStart * value)); feedback = "Масштаб " + Double(zoom).formatted(.number.precision(.fractionLength(1))) + "×"
+                 }.onEnded { _ in zoomStart = zoom; pinching = false; feedback = nil; touch() })
+                 .padding(.top, controls && !locked ? (landscape ? 66 : 50) : 0).padding(.bottom, controls && !locked ? (landscape ? 124 : 48) : 0)
+                if controls && !locked && model.error == nil && !model.loading { transport(landscape: landscape).zIndex(10) }
                 if controls && !locked {
                     LinearGradient(colors: [.black.opacity(0.75), .clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom).allowsHitTesting(false)
                     VStack(spacing: 0) {
@@ -103,21 +108,18 @@ struct MultiSourcePlayerScreen: View {
                         if landscape { timeline; landscapeActions }
                         else { HStack { Spacer(); iconButton("arrow.up.left.and.arrow.down.right", label: "На весь экран") { rotate(.landscapeRight) } } }
                     }.padding(.horizontal, landscape ? max(24, max(insets.left, insets.right) + 12) : 12)
-                     .padding(.top, landscape ? 12 : 4).padding(.bottom, landscape ? max(12, insets.bottom) : 4)
-                    if model.error == nil && !model.loading { transport(landscape: landscape) }
+                     .padding(.top, landscape ? 12 : 4).padding(.bottom, landscape ? max(12, insets.bottom) : 4).zIndex(20)
                 }
                 if model.loading && model.error == nil { ProgressView().controlSize(.large).tint(.white).padding(18).background(.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 16)).allowsHitTesting(false) }
                 if model.error != nil {
                     VStack(spacing: 9) {
                         Text("Видео недоступно").font(.headline)
-                        HStack { Button("Повторить") { model.select(model.selected, preservePosition: true) }; Button("Сменить озвучку") { panel = .voices } }.font(.subheadline.bold()).buttonStyle(.bordered)
+                        HStack { Button("Повторить") { model.select(model.selected, preservePosition: true) }; Button("Сменить озвучку") { showPanel(.voices) } }.font(.subheadline.bold()).buttonStyle(.bordered)
                     }.padding(16).background(.black.opacity(0.85), in: RoundedRectangle(cornerRadius: 16))
                 }
                 if locked { VStack { Spacer(); Button { locked = false; touch() } label: { Label("Разблокировать", systemImage: "lock.fill").font(.subheadline.bold()).padding(13).background(.black.opacity(0.75), in: Capsule()) }.padding(.bottom, 20) } }
                 if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(15).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
-            }.clipped().simultaneousGesture(MagnificationGesture().onChanged { value in
-                guard !locked else { return }; pinching = true; dragMode = nil; scrub = nil; zoom = max(1, min(2, zoomStart * value)); feedback = "Масштаб " + Double(zoom).formatted(.number.precision(.fractionLength(1))) + "×"
-            }.onEnded { _ in zoomStart = zoom; pinching = false; feedback = nil; touch() })
+            }.clipped()
         }
     }
     private func tapZone(_ delta: Double) -> some View {
@@ -132,7 +134,7 @@ struct MultiSourcePlayerScreen: View {
             Spacer(minLength: 0)
             if zoom > 1 { Button("1:1") { zoom = 1; zoomStart = 1; touch() }.font(.caption.bold()).frame(width: 44, height: 44).accessibilityLabel("Сбросить увеличение видео") }
             if landscape { iconButton("lock.open", label: "Заблокировать касания") { locked = true; controls = false } }
-            iconButton("ellipsis", label: "Настройки просмотра") { panel = .settings }
+            iconButton("ellipsis", label: "Настройки просмотра") { showPanel(.settings) }
         }
     }
     private func transport(landscape: Bool) -> some View {
@@ -165,7 +167,7 @@ struct MultiSourcePlayerScreen: View {
                 HStack(spacing: 10) {
                     Button { model.previous(); touch() } label: { Image(systemName: "backward.end.fill").frame(width: 44, height: 48).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 13)) }.disabled(!model.hasPrevious).opacity(model.hasPrevious ? 1 : 0.35).accessibilityLabel("Предыдущая серия")
                     Button { model.next(); touch() } label: { HStack { Text("Следующая серия").font(.subheadline.bold()); Spacer(); Image(systemName: "forward.end.fill") }.padding(.horizontal, 14).frame(height: 48).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 13)) }.disabled(!model.hasNext).opacity(model.hasNext ? 1 : 0.35)
-                    Button { panel = .settings } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 48).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 13)) }.accessibilityLabel("Качество и настройки")
+                    Button { showPanel(.settings) } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 48).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 13)) }.accessibilityLabel("Качество и настройки").accessibilityIdentifier("player.settings.portrait")
                 }.buttonStyle(.plain)
                 if let error = model.error { Text(error).font(.caption).foregroundStyle(Cinema.muted) }
                 if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(Cinema.muted) }
@@ -179,21 +181,21 @@ struct MultiSourcePlayerScreen: View {
         }.scrollIndicators(.hidden)
     }
     private func roomTab(_ title: String, value: Int) -> some View {
-        Button { section = value } label: { Text(title).font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 12).background(section == value ? Cinema.accent.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 11)).foregroundStyle(section == value ? Cinema.accent : Cinema.muted) }.buttonStyle(.plain)
+        Button { section = value } label: { Text(title).font(.subheadline.bold()).frame(maxWidth: .infinity).padding(.vertical, 12).background(section == value ? Cinema.accent.opacity(0.2) : .clear, in: RoundedRectangle(cornerRadius: 11)).foregroundStyle(section == value ? Cinema.accent : Cinema.muted) }.buttonStyle(.plain).accessibilityIdentifier("watch.tab.\(value)")
     }
     private var landscapeActions: some View {
         HStack(spacing: 18) {
-            Button { panel = .episodes } label: { Label("Серии", systemImage: "rectangle.grid.2x2") }
-            Button { panel = .voices } label: { Label(model.selected.voiceName, systemImage: "waveform").lineLimit(1) }
+            Button { showPanel(.episodes) } label: { Label("Серии", systemImage: "rectangle.grid.2x2").frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.episodes")
+            Button { showPanel(.voices) } label: { Label(model.selected.voiceName, systemImage: "waveform").lineLimit(1).frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.voices")
             Spacer(minLength: 0)
-            Button(model.quality + " · " + model.rate.formatted() + "×") { panel = .settings }
+            Button { showPanel(.settings) } label: { Text(model.quality + " · " + model.rate.formatted() + "×").frame(minHeight: 44).contentShape(Rectangle()) }.accessibilityIdentifier("player.quality")
             iconButton("backward.end.fill", label: "Предыдущая серия") { model.previous(); touch() }.disabled(!model.hasPrevious)
             iconButton("forward.end.fill", label: "Следующая серия") { model.next(); touch() }.disabled(!model.hasNext)
             iconButton("arrow.down.right.and.arrow.up.left", label: "Вернуться к списку серий") { rotate(.portrait) }
         }.font(.system(size: 13, weight: .semibold)).buttonStyle(.plain).padding(.top, 4)
     }
     private func iconButton(_ icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: icon).font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel(label)
+        Button(action: action) { Image(systemName: icon).font(.system(size: 17, weight: .semibold)).frame(width: 44, height: 44).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier("player.icon.\(icon)")
     }
     private func playerSheet(_ selection: PlayerPanel) -> some View {
         NavigationStack {
@@ -205,14 +207,14 @@ struct MultiSourcePlayerScreen: View {
                         else { VoicePicker(videos: model.videos, selected: model.selected.groupKey, episode: model.selected.number) { model.chooseVoice($0); panel = nil; touch() }.padding(20) }
                     }.background(Cinema.background)
                 }
-            }.navigationTitle(selection == .episodes ? "Выбрать серию" : selection == .voices ? "Озвучки" : "Настройки просмотра").navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { panel = nil; touch() } }
+            }.navigationTitle(selection == .episodes ? "Выбрать серию" : selection == .voices ? "Озвучки" : "Настройки просмотра").navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { panel = nil; touch() }.accessibilityIdentifier("panel.close") }
         }.preferredColorScheme(.dark).tint(Cinema.accent).presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
     }
     private var settings: some View {
         Form {
             Section("Качество видео") {
                 if model.choices.isEmpty { Text("Получаем варианты от источника…").foregroundStyle(.secondary) }
-                ForEach(model.choices) { choice in Button { model.changeQuality(choice); panel = nil; touch() } label: { HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } } } }
+                ForEach(model.choices) { choice in Button { model.changeQuality(choice); panel = nil; touch() } label: { HStack { Text(choice.label); Spacer(); if choice.label == model.quality { Image(systemName: "checkmark") } } }.accessibilityIdentifier("quality.\(choice.label)") }
             }
             Section("Скорость") {
                 Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.setRate($0) })) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) } }
@@ -233,6 +235,12 @@ struct MultiSourcePlayerScreen: View {
                 Text("Двойное касание слева или справа — ±10 секунд. Горизонтальный свайп — перемотка с предпросмотром времени. Вертикальный свайп слева — яркость, справа — громкость плеера. Разведите два пальца для увеличения видео; кнопка 1:1 возвращает исходный размер.").font(.footnote).foregroundStyle(.secondary)
             }
         }
+    }
+    private func showPanel(_ selection: PlayerPanel) {
+        touch(); panel = selection
+        #if DEBUG
+        NSLog("ANIMEAPP_UI_panel requested %@", selection.rawValue)
+        #endif
     }
     private func touch() { controls = true; interaction += 1 }
     private func jump(_ delta: Double) { guard !locked, model.seekable else { return }; model.seek(model.seconds + delta); feedback = delta > 0 ? "+10 сек" : "−10 сек"; interaction += 1 }

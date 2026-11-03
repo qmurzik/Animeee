@@ -66,6 +66,13 @@ class ProviderContract(unittest.TestCase):
         videos = self.get('https://api.yani.tv/anime/111/videos')['response']
         self.assertTrue(videos)
 
+    def test_shikimori_real_clip_catalog(self):
+        clips = self.get('https://shikimori.io/api/animes/1735/videos')
+        self.assertTrue(clips)
+        self.assertTrue(any(x.get('kind') == 'op' for x in clips))
+        self.assertTrue(any(x.get('kind') == 'ed' for x in clips))
+        self.assertTrue(all(isinstance(x['url'], str) and isinstance(x['id'], int) for x in clips))
+
     def test_aniskip(self):
         result = self.get('https://api.aniskip.com/v2/skip-times/1735/1?types=op&types=ed&episodeLength=0')
         self.assertTrue(result['found'])

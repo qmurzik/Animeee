@@ -24,6 +24,8 @@ jobs:
           test "$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP/Info.plist")" = 18.0
           /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$APP/Info.plist")" = AppIcon
+          test -f "$APP/Assets.car"
           lipo "$APP/AnimeApp" -verify_arch arm64
           otool -l "$APP/AnimeApp" | grep -q '@executable_path/Frameworks'
           test -f "$APP/Frameworks/MobileVLCKit.framework/MobileVLCKit"
@@ -112,6 +114,15 @@ jobs:
           SIMCTL_CHILD_ANIMEAPP_LANDSCAPE=0 SIMCTL_CHILD_ANIMEAPP_PANEL=voices SIMCTL_CHILD_ANIMEAPP_PROBE=aksor xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot voices.png
+      - name: Tap fullscreen controls and check the installed icon
+        timeout-minutes: 15
+        run: |
+          xcodebuild -project AnimeApp.xcodeproj -scheme AnimeAppUITests -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild -resultBundlePath UITests.xcresult -parallel-testing-enabled NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fullscreen-ui-tests
+          path: UITests.xcresult
       - uses: actions/upload-artifact@v4
         with:
           name: simulator-home

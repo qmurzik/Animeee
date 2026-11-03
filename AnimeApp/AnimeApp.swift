@@ -16,6 +16,7 @@ struct Anime: Codable, Identifiable {
     let description: String?
     let year: Int?
     let episodes: [Episode]?
+    var shikimoriID: Int? = nil
     var imageURL: URL? { guard let src = poster?.src else { return nil }; return URL(string: src.hasPrefix("http") ? src : "https://anilibria.top" + src) }
 }
 struct Segment: Codable { let start: Double?; let stop: Double?
@@ -73,9 +74,15 @@ struct PlaybackProbeView: View {
     }
     @State private var context: WatchRequest?
     var body: some View {
-        NavigationStack {
-            if let context { MultiSourcePlayerScreen(sourceAnime: context.anime, video: context.video, videos: context.videos) }
-            else { ProgressView("Загружаем тестовый тайтл…") }
+        Group {
+            if ProcessInfo.processInfo.environment["ANIMEAPP_UI_TEST"] == "1" {
+                RootView().fullScreenCover(item: $context) { request in MultiSourcePlayerScreen(sourceAnime: request.anime, video: request.video, videos: request.videos) }
+            } else {
+                NavigationStack {
+                    if let context { MultiSourcePlayerScreen(sourceAnime: context.anime, video: context.video, videos: context.videos) }
+                    else { ProgressView("Загружаем тестовый тайтл…") }
+                }
+            }
         }.task {
             guard context == nil else { return }
             if mode == "aksor", let anime = try? await YaniAPI.detail(119), let all = try? await YaniAPI.videos(119), let actual = all.first(where: { $0.id == video.id }) {
@@ -92,7 +99,7 @@ struct PlaybackProbeView: View {
 // separately from the existing positive AniLibria IDs in saved data.
 struct YaniCatalogItem: Decodable {
     struct Image: Decodable { let fullsize: String?; let big: String? }
-    struct IDs: Decodable { let myanimelist_id: Int? }
+    struct IDs: Decodable { let myanimelist_id: Int?; let shikimori_id: Int? }
     let anime_id: Int
     let title: String
     let description: String?
@@ -101,7 +108,7 @@ struct YaniCatalogItem: Decodable {
     let remote_ids: IDs?
     var anime: Anime {
         let image = poster?.big ?? poster?.fullsize
-        return Anime(id: -anime_id, mal: remote_ids?.myanimelist_id.map { .init(id: $0) }, name: .init(main: title, english: nil), poster: image.map { .init(src: $0.hasPrefix("//") ? "https:" + $0 : $0) }, description: description, year: year, episodes: nil)
+        return Anime(id: -anime_id, mal: remote_ids?.myanimelist_id.map { .init(id: $0) }, name: .init(main: title, english: nil), poster: image.map { .init(src: $0.hasPrefix("//") ? "https:" + $0 : $0) }, description: description, year: year, episodes: nil, shikimoriID: remote_ids?.shikimori_id)
     }
 }
 struct YaniCatalogResponse: Decodable { let response: [YaniCatalogItem] }
@@ -495,7 +502,7 @@ struct AksorResolver {
             if !reportedFrame, seconds > 2, player.hasVideoOut, let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] {
                 reportedFrame = true
                 NSLog("ANIMEAPP_FRAME_%@ seconds=%.2f", probe, seconds)
-                Task { @MainActor [weak self] in await self?.probeControls(probe) }
+                if ProcessInfo.processInfo.environment["ANIMEAPP_UI_TEST"] != "1" { Task { @MainActor [weak self] in await self?.probeControls(probe) } }
             }
             #endif
             tickCount += 1; if tickCount % 10 == 0 && pendingSeek == nil { save() }
@@ -539,7 +546,7 @@ struct AksorResolver {
 }
 struct VLCSurface: UIViewRepresentable {
     let player: VLCMediaPlayer
-    func makeUIView(context: Context) -> UIView { let view = UIView(); view.backgroundColor = .black; player.drawable = view; return view }
+    func makeUIView(context: Context) -> UIView { let view = UIView(); view.backgroundColor = .black; view.isUserInteractionEnabled = false; player.drawable = view; return view }
     func updateUIView(_ view: UIView, context: Context) { if player.drawable == nil { player.drawable = view } }
 }
 struct HistoryEntry: Codable, Identifiable {

@@ -34,4 +34,13 @@ final class WatchCoreTests: XCTestCase {
         XCTAssertEqual(PlaybackMath.resumeID([101], remembered: nil, numbers: ["1", "2"], episode: "2"), 101)
     }
 
+    func testShikimoriVideoIsAnExternalClipAndRejectsUnsafeLinks() throws {
+        let payload = Data(#"{"id":44952,"url":"https://video.sibnet.ru/shell.php?videoid=5237538","name":"OP19v2","kind":"op","hosting":"sibnet"}"#.utf8)
+        let clip = try JSONDecoder().decode(ExternalVideo.self, from: payload)
+        XCTAssertEqual(clip.kindTitle, "Опенинг")
+        XCTAssertEqual(clip.destination?.host, "video.sibnet.ru")
+        let unsafe = Data(#"{"id":1,"url":"javascript:alert(1)","name":null,"kind":"pv","hosting":"other"}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(ExternalVideo.self, from: unsafe).destination)
+    }
+
 }

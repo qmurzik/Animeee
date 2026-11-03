@@ -16,7 +16,8 @@ targets:
         product: VLCKitSPM
     settings:
       base:
-        MARKETING_VERSION: 0.6.0
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: 0.7.0
         CURRENT_PROJECT_VERSION: 1
         PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer
         LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/Frameworks"
@@ -28,3 +29,24 @@ targets:
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         TARGETED_DEVICE_FAMILY: '1'
         IPHONEOS_DEPLOYMENT_TARGET: '18.0'
+
+  AnimeAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
+    dependencies:
+      - target: AnimeApp
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer.UITests
+        TEST_TARGET_NAME: AnimeApp
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: '5.0'
+schemes:
+  AnimeAppUITests:
+    build:
+      targets:
+        AnimeApp: all
+        AnimeAppUITests: [test]
+    test:
+      targets: [AnimeAppUITests]

@@ -175,7 +175,7 @@ struct DetailView: View {
                             let position = resumePosition(video)
                             PrimaryWatchButton(title: position > 0 ? "Продолжить · серия \(video.number ?? "—")" : "Смотреть · серия \(video.number ?? "—")", subtitle: video.voiceName + (position > 0 ? " · с " + playbackClock(position) : "")) { open(video, anime, transferPosition: true) }
                             Button { voiceSheet = true } label: {
-                                HStack(spacing: 12) { Image(systemName: "waveform").foregroundStyle(Cinema.accent).frame(width: 30); VStack(alignment: .leading, spacing: 4) { Text(video.voiceName).font(.subheadline.bold()).foregroundStyle(.white); Text("\(video.playerName) · \(VoicePreferences.sortedGroups(videos).count) вариантов озвучки").font(.caption).foregroundStyle(Cinema.muted) }; Spacer(); Image(systemName: "chevron.up.chevron.down").foregroundStyle(Cinema.muted) }.padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 17))
+                                HStack(spacing: 12) { Image(systemName: "waveform").foregroundStyle(Cinema.accent).frame(width: 30); VStack(alignment: .leading, spacing: 4) { Text(video.voiceName).font(.subheadline.bold()).foregroundStyle(.white); Text("\(video.playerName) · Озвучек: \(VoicePreferences.sortedGroups(videos).count)").font(.caption).foregroundStyle(Cinema.muted) }; Spacer(); Image(systemName: "chevron.up.chevron.down").foregroundStyle(Cinema.muted) }.padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 17))
                             }.buttonStyle(.plain)
                             EpisodeGrid(videos: selectedEpisodes, currentID: resume?.id, animeID: anime.id) { open($0, anime) }
                         }
@@ -183,6 +183,7 @@ struct DetailView: View {
                         if let error { VStack(alignment: .leading, spacing: 8) { Text(error).font(.subheadline).foregroundStyle(Cinema.muted); Button("Повторить загрузку серий") { Task { await loadVideos(anime) } }; if SessionKeychain.read() == nil { Button("Войти в YummyAnime") { accountSheet = true } } }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }
                         if let episode = anime.episodes?.first(where: { !$0.streams.isEmpty }) { NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Смотреть AniLibria", systemImage: "play.fill").font(.headline).padding() } }
                         LibraryControls(anime: anime)
+                        if let shikimoriID = anime.shikimoriID, shikimoriID > 0 { ShikimoriVideosView(animeID: shikimoriID) }
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Об аниме").font(.title3.bold())
                             Text(cleanDescription(anime.description)).font(.subheadline).foregroundStyle(Cinema.muted).lineSpacing(5).lineLimit(expanded ? nil : 4)
