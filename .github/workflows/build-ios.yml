@@ -3,6 +3,11 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: write
 jobs:
   build:
     runs-on: macos-15
@@ -24,6 +29,16 @@ jobs:
         with:
           name: AnimeApp-unsigned
           path: AnimeApp-unsigned.ipa
+      - name: Publish unsigned prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="build-${{ github.run_number }}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" AnimeApp-unsigned.ipa --clobber
+          else
+            gh release create "$tag" AnimeApp-unsigned.ipa --target "${{ github.sha }}" --prerelease --title "AnimeApp build ${{ github.run_number }}" --notes "Unsigned iOS 18 ARM64 build. AniLibria uses AVPlayer; Aksor DASH and CVH MP4 use VLCKit. Physical iPhone playback remains unverified."
+          fi
   simulator:
     runs-on: macos-15
     steps:
