@@ -64,10 +64,11 @@ struct SourceDetailView: View {
     @State private var loading = false
     @State private var error: String?
     @State private var match: Anime?
+    @State private var matching = false
+    @State private var matchError: String?
     @State private var browser: SourceBrowserRequest?
     @State private var revision = 0
     @AppStorage("source.revision") private var configurationRevision = ""
-    @State private var rememberedEpisode = ""
     private var savedKey: String { "source.last." + title.id }
     var body: some View {
         ScrollView {
@@ -76,9 +77,10 @@ struct SourceDetailView: View {
                     Artwork(url: title.poster).frame(width: 108, height: 155).clipShape(RoundedRectangle(cornerRadius: 16))
                     VStack(alignment: .leading, spacing: 10) { Text(title.source.title.uppercased()).font(.caption.bold()).foregroundStyle(Cinema.accent); Text(title.title).font(.title2.bold()).lineLimit(5); if !episodes.isEmpty { Text("\(episodes.count) серий в каталоге").font(.footnote).foregroundStyle(Cinema.muted) } }
                 }
+                if let match { NavigationLink { DetailView(id: match.id) } label: { Label("Нативный просмотр · YummyAnime", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(Cinema.accent, in: RoundedRectangle(cornerRadius: 16)).foregroundStyle(.white) }; Text("Совпадение подтверждено по Shikimori ID. Источник серий — YummyAnime; доступные озвучки зависят от авторизации.").font(.footnote).foregroundStyle(Cinema.muted) }
                 if title.source == .shikimori {
-                    if let match { NavigationLink { DetailView(id: match.id) } label: { Label("Смотреть · YummyAnime", systemImage: "play.fill").frame(maxWidth: .infinity).padding().background(Cinema.accent, in: RoundedRectangle(cornerRadius: 16)).foregroundStyle(.white) }; Text("Совпадение подтверждено по Shikimori ID. Доступные серии и озвучки зависят от YummyAnime и авторизации.").font(.footnote).foregroundStyle(Cinema.muted) }
-                    else if !loading && error == nil { Text("Точное соответствие в YummyAnime не найдено. Публичный API Shikimori не вернул полные серии.").foregroundStyle(Cinema.muted) }
+                    if matching { ProgressView("Ищем серии в YummyAnime…") }
+                    else if match == nil { Text(matchError ?? "Точное соответствие в YummyAnime не найдено. Публичный API Shikimori не вернул полные серии.").foregroundStyle(Cinema.muted); Button("Повторить поиск серий") { Task { await matchNative() } } }
                     if let id = title.shikimoriID { ShikimoriVideosView(animeID: id) }
                 } else {
                     if let selection {
@@ -107,6 +109,7 @@ struct SourceDetailView: View {
         }.background(Cinema.background).navigationBarTitleDisplayMode(.inline)
         .task(id: String(revision) + configurationRevision) { await load() }
         .task(id: selection?.id) { if let selection { await loadPlayers(selection) } }
+        .task(id: title.id) { await matchNative() }
         .fullScreenCover(item: $browser) { SourceBrowserScreen(request: $0) }
     }
     private var sortedPlayers: [SourcePlayer] {
@@ -114,7 +117,7 @@ struct SourceDetailView: View {
         return players.sorted { a, b in if (a.studio == saved) != (b.studio == saved) { return a.studio == saved }; return a.label.localizedStandardCompare(b.label) == .orderedAscending }
     }
     private func open(_ player: SourcePlayer) {
-        if let selection { UserDefaults.standard.set(selection.id, forKey: savedKey); rememberedEpisode = selection.id }
+        if let selection { UserDefaults.standard.set(selection.id, forKey: savedKey) }
         UserDefaults.standard.set(player.studio, forKey: "source.voice." + title.id)
         browser = .init(url: player.embed, referer: SourceConfiguration.page(title, episode: selection), title: player.label)
     }
@@ -122,9 +125,7 @@ struct SourceDetailView: View {
         loading = true; error = nil
         do {
             if title.source == .shikimori {
-                let response: YaniCatalogResponse = try await YaniAPI.request("/anime", query: [.init(name: "q", value: title.title), .init(name: "limit", value: "50")])
-                let found = response.response.filter { $0.remote_ids?.shikimori_id == title.shikimoriID }
-                try Task.checkCancellation(); match = found.count == 1 ? found.first?.anime : nil; loading = false
+                loading = false
             } else {
                 let result = try await SourceConfiguration.catalog(title.source).episodes(title)
                 try Task.checkCancellation(); episodes = result
@@ -134,6 +135,15 @@ struct SourceDetailView: View {
                 else { selection = chosen; if chosen == nil { loading = false } }
             }
         } catch { guard !Task.isCancelled else { return }; self.error = error.localizedDescription; loading = false }
+    }
+    private func matchNative() async {
+        guard let shikimoriID = title.shikimoriID, shikimoriID > 0 else { return }
+        matching = true; matchError = nil
+        do {
+            let response: YaniCatalogResponse = try await YaniAPI.request("/anime", query: [.init(name: "q", value: title.title), .init(name: "limit", value: "50")])
+            let found = response.response.filter { $0.remote_ids?.shikimori_id == shikimoriID }
+            try Task.checkCancellation(); match = found.count == 1 ? found.first?.anime : nil; matching = false
+        } catch { guard !Task.isCancelled else { return }; matchError = "Поиск серий в YummyAnime: " + error.localizedDescription; matching = false }
     }
     private func loadPlayers(_ episode: SourceEpisode) async {
         players = []; error = nil; loading = true
