@@ -231,12 +231,15 @@ struct YaniSourcesView: View {
             Text("Aksor · дополнительные озвучки").font(.caption).foregroundStyle(.secondary)
             if !loaded && !loading { Button("Найти озвучки") { Task { await load() } }.buttonStyle(.bordered) }
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
+            if let last = HistoryStore.load().first(where: { $0.id == anime.id }), let video = videos.first(where: { "yani-\($0.id)" == last.episodeID && $0.page?.host == "player.aksor.tv" }) {
+                NavigationLink { AksorNativeScreen(sourceAnime: anime, video: video, videos: videos.filter { $0.page?.host == "player.aksor.tv" }) } label: { Label("Продолжить · \(video.voiceName) · серия \(video.number ?? "—")", systemImage: "play.fill").font(.subheadline.bold()).padding().frame(maxWidth: .infinity, alignment: .leading).background(.purple, in: RoundedRectangle(cornerRadius: 14)).foregroundStyle(.white) }
+            }
             ForEach(groups, id: \.key) { group in
                 NavigationLink {
-                    YaniEpisodesView(anime: anime, name: group.key, videos: videos.filter { $0.groupKey == group.key })
-                } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) записей серий").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
+                    YaniEpisodesView(anime: anime, name: group.key, videos: videos.filter { $0.page?.host == "player.aksor.tv" })
+                } label: { HStack { VStack(alignment: .leading) { Text(group.key); Text("\(group.count) серий · выбрать озвучку").font(.caption).foregroundStyle(.secondary) }; Spacer(); if preferred == group.key { Image(systemName: "star.fill").foregroundStyle(.yellow) } }.padding(10).background(.white.opacity(0.06)).cornerRadius(10) }
             }
-        }
+        }.task { if !loaded && !loading { await load() } }
     }
     func load() async {
         loading = true; error = nil
@@ -250,7 +253,7 @@ struct YaniEpisodesView: View {
     let name: String
     let videos: [YaniVideo]
     @AppStorage("preferredYaniVoice") private var preferred = ""
-    var sorted: [YaniVideo] { videos.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
+    var sorted: [YaniVideo] { videos.filter { $0.groupKey == name }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
     var body: some View {
         List {
             Section { Button(preferred == name ? "Убрать из предпочтений" : "Предпочитать эту озвучку и плеер") { preferred = preferred == name ? "" : name } }
@@ -259,7 +262,7 @@ struct YaniEpisodesView: View {
                     if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { AksorNativeScreen(sourceAnime: anime, video: video, videos: videos) } }
                 }
             }
-        }.navigationTitle(name).navigationBarTitleDisplayMode(.inline)
+        }.scrollContentBackground(.hidden).background(Color(red: 0.045, green: 0.04, blue: 0.075)).navigationTitle(name).navigationBarTitleDisplayMode(.inline)
     }
 }
 struct AksorResponse: Decodable { let qualities: [String: String?] }

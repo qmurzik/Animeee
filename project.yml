@@ -2,11 +2,18 @@ name: AnimeApp
 options:
   deploymentTarget:
     iOS: '18.0'
+packages:
+  VLCKit:
+    url: https://github.com/tylerjonesio/vlckit-spm
+    exactVersion: 3.6.0
 targets:
   AnimeApp:
     type: application
     platform: iOS
     sources: [AnimeApp]
+    dependencies:
+      - package: VLCKit
+        product: VLCKitSPM
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.animeapp.viewer
