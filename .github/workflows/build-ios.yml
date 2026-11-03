@@ -37,7 +37,7 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" AnimeApp-unsigned.ipa --clobber
           else
-            gh release create "$tag" AnimeApp-unsigned.ipa --target "${{ github.sha }}" --prerelease --title "AnimeApp build ${{ github.run_number }}" --notes "Unsigned iOS 18 ARM64 build. AniLibria uses AVPlayer; Aksor DASH and CVH MP4 use VLCKit. Physical iPhone playback remains unverified."
+            gh release create "$tag" AnimeApp-unsigned.ipa Licenses/VLCKit-LGPL-2.1.txt THIRD_PARTY.md --target "${{ github.sha }}" --prerelease --title "AnimeApp build ${{ github.run_number }}" --notes "Unsigned iOS 18 ARM64 build. AniLibria uses AVPlayer; Aksor DASH and CVH MP4 use VLCKit. Physical iPhone playback remains unverified."
           fi
   simulator:
     runs-on: macos-15
@@ -61,7 +61,12 @@ jobs:
           xcrun simctl ui "$SIMULATOR_ID" appearance dark
           codesign --force --deep --sign - simbuild/Build/Products/Debug-iphonesimulator/AnimeApp.app
           xcrun simctl install "$SIMULATOR_ID" simbuild/Build/Products/Debug-iphonesimulator/AnimeApp.app
-          xcrun simctl launch "$SIMULATOR_ID" com.animeapp.viewer
+          launched=0
+          for attempt in 1 2 3; do
+            if xcrun simctl launch "$SIMULATOR_ID" com.animeapp.viewer; then launched=1; break; fi
+            sleep 10
+          done
+          test "$launched" = 1
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot home.png
       - uses: actions/upload-artifact@v4
@@ -73,9 +78,21 @@ jobs:
         run: |
           mkdir -p diagnostics
           xcrun simctl spawn "$SIMULATOR_ID" log show --last 5m --style compact --predicate 'process == "AnimeApp"' > diagnostics/app.log 2>&1 || true
-          find "$HOME/Library/Logs/DiagnosticReports" -name '*AnimeApp*' -exec cp {} diagnostics/ \; 2>/dev/null || true
+          find "$HOME/Library/Logs/DiagnosticReports" "$HOME/Library/Developer/CoreSimulator/Devices/$SIMULATOR_ID/data/Library/Logs" -name '*AnimeApp*' -exec cp {} diagnostics/ \; 2>/dev/null || true
+          tail -150 diagnostics/app.log
+          for report in diagnostics/*.ips; do test -f "$report" && head -120 "$report"; done
+          true
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
           name: simulator-diagnostics
           path: diagnostics
+      - name: Attach simulator result to release
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="build-${{ github.run_number }}"
+          for attempt in 1 2 3; do gh release view "$tag" >/dev/null 2>&1 && break; sleep 10; done
+          if test -f home.png; then gh release upload "$tag" home.png --clobber; fi
+          if test -d diagnostics; then tar -czf simulator-diagnostics.tgz diagnostics; gh release upload "$tag" simulator-diagnostics.tgz --clobber; fi
