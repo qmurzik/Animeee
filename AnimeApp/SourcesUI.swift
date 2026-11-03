@@ -24,7 +24,7 @@ struct SourceSearchView: View {
     var body: some View {
         ScrollView { content.padding(20) }
             .background(Cinema.background).navigationTitle("Другие источники")
-            .searchable(text: $query, prompt: "Название аниме")
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Название аниме")
             .toolbar { NavigationLink { SourcesSettingsView() } label: { Image(systemName: "network") }.accessibilityLabel("Зеркала источников") }
             .task(id: searchTaskID) { await search() }
     }
@@ -48,7 +48,7 @@ struct SourceSearchView: View {
     }
     private var results: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 20) {
-            ForEach(items) { title in NavigationLink { SourceDetailView(title: title) } label: { SourceCoverCard(title: title) }.buttonStyle(.plain) }
+            ForEach(items) { title in NavigationLink { SourceDetailView(title: title) } label: { SourceCoverCard(title: title) }.buttonStyle(.plain).accessibilityIdentifier("source.title." + title.id) }
         }
     }
     private func search() async {

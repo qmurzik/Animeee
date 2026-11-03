@@ -59,6 +59,24 @@ final class PlaybackUITests: XCTestCase {
 }
 
 final class SourceSettingsUITests: XCTestCase {
+    func testAnimeLIBLiveCatalogEpisodesAndTranslations() {
+        continueAfterFailure = false
+        XCUIDevice.shared.orientation = .portrait
+        let app = XCUIApplication(); app.launch()
+        app.tabBars.buttons["Поиск"].tap()
+        let sources = app.buttons["Другие источники"]
+        XCTAssertTrue(sources.waitForExistence(timeout: 15)); sources.tap()
+        let search = app.searchFields.firstMatch
+        XCTAssertTrue(search.waitForExistence(timeout: 15)); search.tap(); search.typeText("Naruto")
+        let naruto = app.buttons["source.title.anilib:11--naruto-anime"]
+        XCTAssertTrue(naruto.waitForExistence(timeout: 30)); naruto.tap()
+        XCTAssertTrue(app.staticTexts["220 серий в каталоге"].waitForExistence(timeout: 30))
+        let voice = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "AniDUB · Озвучка")).firstMatch
+        XCTAssertTrue(voice.waitForExistence(timeout: 30))
+        for _ in 0..<3 { if voice.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(voice.isHittable)
+        let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot()); attachment.name = "anilib-real-episodes-and-voices"; attachment.lifetime = .keepAlways; add(attachment)
+    }
     func testSourceNavigationAndMirrorValidation() {
         continueAfterFailure = false
         XCUIDevice.shared.orientation = .portrait
