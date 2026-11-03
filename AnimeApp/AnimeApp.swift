@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import VLCKitSPM
 import UniformTypeIdentifiers
 
 struct Anime: Codable, Identifiable {
@@ -218,7 +219,7 @@ struct YaniSourcesView: View {
     @State private var loaded = false
     @AppStorage("preferredYaniVoice") private var preferred = ""
     var groups: [(key: String, count: Int)] {
-        let grouped = Dictionary(grouping: videos, by: \.groupKey)
+        let grouped = Dictionary(grouping: videos.filter { $0.page?.host == "player.aksor.tv" }, by: \.groupKey)
         return grouped.map { (key: $0.key, count: $0.value.count) }.sorted { a, b in
             if (a.key == preferred) != (b.key == preferred) { return a.key == preferred }
             return a.key.localizedStandardCompare(b.key) == .orderedAscending
@@ -227,7 +228,7 @@ struct YaniSourcesView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack { Text("Другие озвучки").font(.title2.bold()); Spacer(); if loading { ProgressView() } }
-            Text("Каталог YummyAnime · нативное воспроизведение").font(.caption).foregroundStyle(.secondary)
+            Text("Aksor · дополнительные озвучки").font(.caption).foregroundStyle(.secondary)
             if !loaded && !loading { Button("Найти озвучки") { Task { await load() } }.buttonStyle(.bordered) }
             if let error { Text(error).font(.footnote).foregroundStyle(.secondary); Button("Повторить") { Task { await load() } }.font(.footnote) }
             ForEach(groups, id: \.key) { group in
@@ -239,7 +240,7 @@ struct YaniSourcesView: View {
     }
     func load() async {
         loading = true; error = nil
-        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if videos.isEmpty { error = "Источник не вернул доступных страниц плеера." } }
+        do { videos = try await YaniProvider().videos(for: anime); loaded = true; if !videos.contains(where: { $0.page?.host == "player.aksor.tv" }) { error = "Для этого тайтла пока нет поддерживаемых дополнительных потоков. Доступна AniLibria." } }
         catch { self.error = "YummyAnime: \(error.localizedDescription)" }
         loading = false
     }
@@ -255,47 +256,149 @@ struct YaniEpisodesView: View {
             Section { Button(preferred == name ? "Убрать из предпочтений" : "Предпочитать эту озвучку и плеер") { preferred = preferred == name ? "" : name } }
             Section("Серии") {
                 ForEach(sorted) { video in
-                    if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { AksorNativeScreen(sourceAnime: anime, video: video) } }
+                    if video.page != nil { NavigationLink("Серия \(video.number ?? "—")") { AksorNativeScreen(sourceAnime: anime, video: video, videos: videos) } }
                 }
             }
         }.navigationTitle(name).navigationBarTitleDisplayMode(.inline)
     }
 }
 struct AksorResponse: Decodable { let qualities: [String: String?] }
+struct StreamChoice: Identifiable { let label: String; let url: URL; var id: String { label } }
+struct AksorResolver {
+    func resolve(_ video: YaniVideo) async throws -> [StreamChoice] {
+        guard let page = video.page, page.host?.lowercased() == "player.aksor.tv", page.pathComponents.count == 3, page.pathComponents[1] == "video",
+              page.lastPathComponent.range(of: "^[a-zA-Z0-9_-]{1,128}$", options: .regularExpression) != nil,
+              let api = URL(string: "https://player.aksor.tv/api/video/\(page.lastPathComponent)") else { throw URLError(.unsupportedURL) }
+        var request = URLRequest(url: api); request.setValue(page.absoluteString, forHTTPHeaderField: "Referer")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+        let payload = try JSONDecoder().decode(AksorResponse.self, from: data)
+        let choices = ["q480", "q720", "q1080", "q360"].compactMap { key -> StreamChoice? in
+            guard let raw = payload.qualities[key] ?? nil, let url = URL(string: raw.replacingOccurrences(of: " ", with: "%20")), url.scheme == "https", ["m3u8", "mp4", "mpd"].contains(url.pathExtension.lowercased()) else { return nil }
+            return StreamChoice(label: key.dropFirst() + "p", url: url)
+        }
+        guard !choices.isEmpty else { throw URLError(.resourceUnavailable) }
+        return choices
+    }
+}
+@MainActor final class AksorPlayback: ObservableObject {
+    let anime: Anime
+    let videos: [YaniVideo]
+    let player = VLCMediaPlayer()
+    @Published var selected: YaniVideo
+    @Published var choices: [StreamChoice] = []
+    @Published var quality = ""
+    @Published var loading = false
+    @Published var error: String?
+    @Published var seconds: Double = 0
+    @Published var duration: Double = 0
+    @Published var playing = false
+    @Published var rate: Float = 1
+    private var poll: Timer?
+    private var task: Task<Void, Never>?
+    private var pendingSeek: Double?
+    private var tickCount = 0
+    var key: String { "progress.\(anime.id).yani-\(selected.id)" }
+    var voices: [String] { Array(Set(videos.map(\.groupKey))).sorted() }
+    var episodes: [YaniVideo] { videos.filter { $0.groupKey == selected.groupKey }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
+    init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; selected = video }
+    func start() {
+        guard poll == nil else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+        try? AVAudioSession.sharedInstance().setActive(true)
+        poll = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
+        select(selected)
+    }
+    func stop() { save(); task?.cancel(); poll?.invalidate(); poll = nil; player.stop(); player.drawable = nil; UIApplication.shared.isIdleTimerDisabled = false }
+    func save() {
+        guard seconds > 0, seconds.isFinite else { return }
+        UserDefaults.standard.set(seconds, forKey: key)
+        HistoryStore.save(HistoryEntry(id: anime.id, title: anime.name.main, episodeID: "yani-\(selected.id)", episodeNumber: Double(selected.number ?? ""), seconds: seconds, updated: Date()))
+    }
+    func select(_ video: YaniVideo, preservePosition: Bool = false) {
+        save(); let prior = preservePosition ? seconds : UserDefaults.standard.double(forKey: "progress.\(anime.id).yani-\(video.id)")
+        task?.cancel(); player.stop(); selected = video; seconds = prior; pendingSeek = prior; error = nil; choices = []; loading = true
+        UserDefaults.standard.set(video.groupKey, forKey: "preferredYaniVoice")
+        task = Task {
+            do {
+                let result = try await AksorResolver().resolve(video)
+                guard !Task.isCancelled else { return }; choices = result
+                let stream = result.first { $0.label == quality } ?? result[0]
+                try await open(stream, position: prior)
+            } catch { if !Task.isCancelled { self.error = "Источник недоступен: \(error.localizedDescription)"; loading = false } }
+        }
+    }
+    func open(_ stream: StreamChoice, position: Double) async throws {
+        if stream.url.pathExtension.lowercased() == "mpd" {
+            let (data, response) = try await URLSession.shared.data(from: stream.url)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+            guard let xml = String(data: data, encoding: .utf8), xml.contains("<MPD"), !xml.contains("ContentProtection") else { throw URLError(.cannotDecodeContentData) }
+        }
+        guard !Task.isCancelled else { return }
+        player.stop(); quality = stream.label; pendingSeek = position
+        let media = VLCMedia(url: stream.url)
+        media.addOption(":network-caching=1500")
+        player.media = media; player.play(); player.rate = rate
+        UIApplication.shared.isIdleTimerDisabled = true
+    }
+    func changeQuality(_ stream: StreamChoice) {
+        let position = seconds; task?.cancel(); loading = true; error = nil
+        task = Task { do { try await open(stream, position: position) } catch { if !Task.isCancelled { self.error = error.localizedDescription; loading = false } } }
+    }
+    func chooseVoice(_ name: String) {
+        guard let video = videos.first(where: { $0.groupKey == name && $0.number == selected.number }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
+        select(video, preservePosition: true)
+    }
+    func next() {
+        guard let index = episodes.firstIndex(where: { $0.id == selected.id }), episodes.indices.contains(index + 1) else { return }
+        select(episodes[index + 1])
+    }
+    func seek(_ value: Double) { guard value.isFinite else { return }; player.time = VLCTime(int: Int32(max(0, min(value, 2_000_000)) * 1000)) }
+    func toggle() { if player.isPlaying { player.pause() } else { player.play(); player.rate = rate } }
+    func tick() {
+        playing = player.isPlaying
+        if player.state == .error { error = "Не удалось воспроизвести поток. Попробуйте повторить или выбрать другой источник."; loading = false }
+        if playing {
+            loading = false
+            if let position = pendingSeek { if player.isSeekable { pendingSeek = nil; seek(position) }; return }
+            seconds = max(0, Double(player.time.intValue) / 1000)
+            duration = max(0, Double(player.media?.length.intValue ?? 0) / 1000)
+            tickCount += 1; if tickCount % 10 == 0 { save() }
+        }
+        if player.state == .ended, UserDefaults.standard.object(forKey: "autoNext") as? Bool ?? true { next() }
+    }
+}
+struct VLCSurface: UIViewRepresentable {
+    let player: VLCMediaPlayer
+    func makeUIView(context: Context) -> UIView { let view = UIView(); view.backgroundColor = .black; player.drawable = view; return view }
+    func updateUIView(_ view: UIView, context: Context) { if player.drawable == nil { player.drawable = view } }
+}
 struct AksorNativeScreen: View {
-    let sourceAnime: Anime
-    let video: YaniVideo
-    @State private var anime: Anime?
-    @State private var episode: Episode?
-    @State private var error: String?
+    @StateObject private var model: AksorPlayback
+    @State private var fullscreen = false
+    init(sourceAnime: Anime, video: YaniVideo, videos: [YaniVideo]) { _model = StateObject(wrappedValue: AksorPlayback(anime: sourceAnime, videos: videos, video: video)) }
     var body: some View {
-        Group {
-            if let anime, let episode { PlayerScreen(anime: anime, episode: episode) }
-            else if let error { ContentUnavailableView("Поток недоступен", systemImage: "play.slash", description: Text(error)) }
-            else { ProgressView("Получаем видеопоток…") }
-        }.task { await resolve() }
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    ZStack {
+                        VLCSurface(player: model.player).frame(height: fullscreen ? max(240, proxy.size.height - 200) : 240)
+                        if model.loading { ProgressView().tint(.white) }
+                    }.clipShape(RoundedRectangle(cornerRadius: 18))
+                    HStack { Button { model.seek(model.seconds - 10) } label: { Image(systemName: "gobackward.10") }; Spacer(); Button { model.toggle() } label: { Image(systemName: model.playing ? "pause.fill" : "play.fill") }; Spacer(); Button { model.seek(model.seconds + 10) } label: { Image(systemName: "goforward.10") }; Spacer(); Button { fullscreen.toggle() } label: { Image(systemName: fullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") } }.font(.title2).padding(.horizontal)
+                    if model.duration > 0 { Slider(value: Binding(get: { min(model.seconds, model.duration) }, set: { model.seek($0) }), in: 0...model.duration); HStack { Text(clock(model.seconds)); Spacer(); Text(clock(model.duration)) }.font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                    Text(model.anime.name.main).font(.title2.bold())
+                    HStack { Text("Серия \(model.selected.number ?? "—")").font(.headline); Spacer(); Menu(model.quality.isEmpty ? "Качество" : model.quality) { ForEach(model.choices) { choice in Button(choice.label) { model.changeQuality(choice) } } }; Menu("\(model.rate.formatted())×") { ForEach([Float(0.5), 1, 1.25, 1.5, 2], id: \.self) { value in Button("\(value.formatted())×") { model.rate = value; model.player.rate = value } } } }
+                    if let error = model.error { Text(error).font(.footnote).foregroundStyle(.orange); Button("Повторить") { model.select(model.selected, preservePosition: true) } }
+                    Menu { ForEach(model.voices, id: \.self) { voice in Button(voice) { model.chooseVoice(voice) } } } label: { Label(model.selected.groupKey, systemImage: "waveform").frame(maxWidth: .infinity, alignment: .leading).padding().background(.purple.opacity(0.15), in: RoundedRectangle(cornerRadius: 14)) }
+                    Text("Серии").font(.title2.bold())
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 64))], spacing: 10) { ForEach(model.episodes) { video in Button(video.number ?? "—") { model.select(video) }.frame(maxWidth: .infinity).padding(.vertical, 14).background(video.id == model.selected.id ? Color.purple : .white.opacity(0.07), in: RoundedRectangle(cornerRadius: 12)).foregroundStyle(.white) } }
+                    if let native = model.anime.episodes?.first(where: { $0.ordinal == Double(model.selected.number ?? "") }) { NavigationLink("Открыть эту серию в AniLibria") { PlayerScreen(anime: model.anime, episode: native) } }
+                }.padding()
+            }.background(Color(red: 0.045, green: 0.04, blue: 0.075))
+        }.navigationBarTitleDisplayMode(.inline).onAppear { model.start() }.onDisappear { model.stop() }
     }
-    func resolve() async {
-        guard let page = video.page, page.host?.lowercased() == "player.aksor.tv", page.pathComponents.count == 3, page.pathComponents[1] == "video" else { error = "Для этого балансера прямой поток пока не поддерживается."; return }
-        let hash = page.lastPathComponent
-        guard hash.range(of: "^[a-zA-Z0-9_-]{1,128}$", options: .regularExpression) != nil,
-              let api = URL(string: "https://player.aksor.tv/api/video/\(hash)") else { error = "Некорректный адрес плеера."; return }
-        do {
-            var req = URLRequest(url: api); req.setValue(page.absoluteString, forHTTPHeaderField: "Referer"); req.setValue("application/json", forHTTPHeaderField: "Accept")
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw URLError(.badServerResponse) }
-            let payload = try JSONDecoder().decode(AksorResponse.self, from: data)
-            func compatible(_ key: String) -> String? {
-                guard let raw = payload.qualities[key] ?? nil, let url = URL(string: raw.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? raw), url.scheme == "https", ["m3u8", "mp4"].contains(url.pathExtension.lowercased()) else { return nil }
-                return url.absoluteString
-            }
-            let q480 = compatible("q480"), q720 = compatible("q720"), q1080 = compatible("q1080")
-            guard q480 != nil || q720 != nil || q1080 != nil else { error = "Aksor вернул MPEG-DASH или другой формат, который встроенный AVPlayer не поддерживает. Выберите AniLibria."; return }
-            let item = Episode(id: "yani-\(video.id)", ordinal: Double(video.number ?? ""), name: nil, opening: nil, ending: nil, duration: nil, hls_480: q480, hls_720: q720, hls_1080: q1080)
-            // Keep the video progress identifier separate from AniLibria episode identifiers.
-            anime = Anime(id: sourceAnime.id, mal: sourceAnime.mal, name: sourceAnime.name, poster: sourceAnime.poster, description: sourceAnime.description, year: sourceAnime.year, episodes: [item]); episode = item
-        } catch { self.error = "Aksor: \(error.localizedDescription)" }
-    }
+    func clock(_ value: Double) -> String { let s = Int(max(0, value)); return String(format: "%d:%02d", s / 60, s % 60) }
 }
 struct HistoryEntry: Codable, Identifiable {
     let id: Int
