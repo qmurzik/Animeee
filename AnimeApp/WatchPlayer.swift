@@ -18,6 +18,8 @@ struct MultiSourcePlayerScreen: View {
     @State private var dragStart: Double = 0
     @State private var brightnessStart: CGFloat = 0.5
     @State private var volumeStart: Int32 = 100
+    @State private var zoom: CGFloat = 1
+    @State private var zoomStart: CGFloat = 1
     @State private var originalBrightness: CGFloat?
     @AppStorage("autoNext") private var autoNext = true
     @AppStorage("openPlayerLandscape") private var openLandscape = false
@@ -33,22 +35,12 @@ struct MultiSourcePlayerScreen: View {
                 videoCanvas(landscape: landscape, insets: insets)
                     .frame(height: landscape ? geometry.size.height : geometry.size.width * 9 / 16)
                 if !landscape {
-                    portraitTimeline
-                    portraitRoom.padding(.bottom, max(12, insets.bottom))
+                    portraitTimeline.allowsHitTesting(!locked)
+                    portraitRoom.allowsHitTesting(!locked).padding(.bottom, max(12, insets.bottom))
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top).background(Cinema.background)
             #if DEBUG
-            .task(id: landscape) {
-                guard landscape, ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" else { return }
-                for _ in 0..<20 {
-                    do { try await Task.sleep(for: .seconds(1)) } catch { return }
-                    if model.player.hasVideoOut && model.playing && model.seconds >= 15 { break }
-                }
-                guard let scene, scene.interfaceOrientation.isLandscape, let window = scene.windows.first(where: \.isKeyWindow), window.bounds.width > window.bounds.height else { NSLog("ANIMEAPP_LANDSCAPE failed scene orientation"); return }
-                let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
-                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("player-landscape.png")
-                do { try image.pngData()?.write(to: url); NSLog("ANIMEAPP_LANDSCAPE verified %.0fx%.0f", window.bounds.width, window.bounds.height) } catch { NSLog("ANIMEAPP_LANDSCAPE failed capture") }
-            }
+            .task(id: landscape) { await captureLandscape(landscape) }
             #endif
         }.ignoresSafeArea().background(Cinema.background).foregroundStyle(.white).tint(Cinema.accent)
         .toolbar(.hidden, for: .navigationBar).toolbar(.hidden, for: .tabBar).statusBarHidden(true)
@@ -62,10 +54,14 @@ struct MultiSourcePlayerScreen: View {
         }
         .task(id: feedback) { guard feedback != nil, dragMode == nil else { return }; do { try await Task.sleep(for: .seconds(1)); feedback = nil } catch {} }
         .onChange(of: model.playing) { _, playing in if !playing { controls = true } }
+        .sensoryFeedback(.selection, trigger: model.selected.id)
         .onChange(of: model.selected.id) { _, _ in scrub = nil; controls = true; interaction += 1 }
         .onChange(of: scenePhase) { _, phase in if phase == .background { model.save(); model.player.pause() } }
         .onAppear {
             model.start()
+            #if DEBUG
+            if ProcessInfo.processInfo.environment["ANIMEAPP_PANEL"] == "voices" { section = 1 }
+            #endif
             #if DEBUG
             let probe = ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"]
             let rotateOnStart = probe == "1" || (probe == nil && openLandscape)
@@ -76,11 +72,24 @@ struct MultiSourcePlayerScreen: View {
         }
         .onDisappear { model.stop(); if let originalBrightness { scene?.screen.brightness = originalBrightness } }
     }
+    #if DEBUG
+    private func captureLandscape(_ landscape: Bool) async {
+    guard landscape, ProcessInfo.processInfo.environment["ANIMEAPP_LANDSCAPE"] == "1" else { return }
+    for _ in 0..<20 {
+        do { try await Task.sleep(for: .seconds(1)) } catch { return }
+        if model.player.hasVideoOut && model.playing && model.seconds >= 15 { break }
+    }
+    guard let scene, scene.interfaceOrientation.isLandscape, let window = scene.windows.first(where: \.isKeyWindow), window.bounds.width > window.bounds.height else { NSLog("ANIMEAPP_LANDSCAPE failed scene orientation"); return }
+    let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+    let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("player-landscape.png")
+    do { try image.pngData()?.write(to: url); NSLog("ANIMEAPP_LANDSCAPE verified %.0fx%.0f", window.bounds.width, window.bounds.height) } catch { NSLog("ANIMEAPP_LANDSCAPE failed capture") }
+    }
+    #endif
     private func videoCanvas(landscape: Bool, insets: UIEdgeInsets) -> some View {
         GeometryReader { video in
             ZStack {
                 Color.black
-                VLCSurface(player: model.player)
+                VLCSurface(player: model.player).scaleEffect(zoom)
                 HStack(spacing: 0) {
                     tapZone(-10)
                     tapZone(10)
@@ -105,7 +114,9 @@ struct MultiSourcePlayerScreen: View {
                 }
                 if locked { VStack { Spacer(); Button { locked = false; touch() } label: { Label("Разблокировать", systemImage: "lock.fill").font(.subheadline.bold()).padding(13).background(.black.opacity(0.75), in: Capsule()) }.padding(.bottom, 20) } }
                 if let feedback { Text(feedback).font(.headline.monospacedDigit()).padding(15).background(.black.opacity(0.75), in: Capsule()).allowsHitTesting(false) }
-            }.clipped()
+            }.clipped().simultaneousGesture(MagnificationGesture().onChanged { value in
+                guard !locked else { return }; zoom = max(1, min(2, zoomStart * value)); feedback = "Масштаб " + Double(zoom).formatted(.number.precision(.fractionLength(1))) + "×"
+            }.onEnded { _ in zoomStart = zoom; feedback = nil; touch() })
         }
     }
     private func tapZone(_ delta: Double) -> some View {
@@ -118,6 +129,7 @@ struct MultiSourcePlayerScreen: View {
                 VStack(alignment: .leading, spacing: 4) { Text(model.anime.name.main).font(.subheadline.bold()).lineLimit(1); Text("Серия \(model.selected.number ?? "—") · \(model.selected.voiceName)").font(.caption).foregroundStyle(.white.opacity(0.65)).lineLimit(1) }
             } else { Text("Серия \(model.selected.number ?? "—")").font(.subheadline.bold()) }
             Spacer(minLength: 0)
+            if zoom > 1 { Button("1:1") { zoom = 1; zoomStart = 1; touch() }.font(.caption.bold()).frame(width: 44, height: 44).accessibilityLabel("Сбросить увеличение видео") }
             if landscape { iconButton("lock.open", label: "Заблокировать касания") { locked = true; controls = false } }
             iconButton("ellipsis", label: "Настройки просмотра") { panel = .settings }
         }
@@ -160,8 +172,8 @@ struct MultiSourcePlayerScreen: View {
                     roomTab("Серии", value: 0)
                     roomTab("Озвучки", value: 1)
                 }.padding(4).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 14))
-                if section == 0 { EpisodeGrid(videos: model.episodes, currentID: model.selected.id, animeID: model.anime.id) { model.select($0); touch() } }
-                else { VoicePicker(videos: model.videos, selected: model.selected.groupKey, episode: model.selected.number) { model.chooseVoice($0); touch() } }
+                if section == 0 { EpisodeGrid(videos: model.episodes, currentID: model.selected.id, animeID: model.anime.id) { model.select($0); touch() }.equatable() }
+                else { VoicePicker(videos: model.videos, selected: model.selected.groupKey, episode: model.selected.number) { model.chooseVoice($0); touch() }.equatable() }
             }.padding(20)
         }.scrollIndicators(.hidden)
     }
@@ -205,6 +217,9 @@ struct MultiSourcePlayerScreen: View {
                 Picker("Скорость просмотра", selection: Binding(get: { model.rate }, set: { model.setRate($0) })) { ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { value in Text("\(value.formatted())×").tag(value) } }
             }
             Section("Просмотр") { Toggle("Следующая серия автоматически", isOn: $autoNext); Toggle("Открывать на весь экран", isOn: $openLandscape) }
+            Section("Громкость плеера") {
+                Slider(value: Binding(get: { Double(model.player.audio?.volume ?? 100) }, set: { model.player.audio?.volume = Int32($0); model.objectWillChange.send() }), in: 0...100).accessibilityLabel("Громкость плеера")
+            }
             Section("Громкость устройства") { SystemVolumeControl().frame(height: 36).listRowInsets(EdgeInsets(top: 14, leading: 20, bottom: 0, trailing: 20)) }
             Section("Аудиодорожки") {
                 ForEach(model.audioTracks, id: \.id) { track in Button { model.player.currentAudioTrackIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentAudioTrackIndex == track.id { Image(systemName: "checkmark") } } } }
@@ -214,7 +229,7 @@ struct MultiSourcePlayerScreen: View {
                 ForEach(model.subtitleTracks, id: \.id) { track in Button { model.player.currentVideoSubTitleIndex = track.id; model.objectWillChange.send() } label: { HStack { Text(track.name); Spacer(); if model.player.currentVideoSubTitleIndex == track.id { Image(systemName: "checkmark") } } } }
             }
             Section("Жесты на видео") {
-                Text("Двойное касание слева или справа — ±10 секунд. Горизонтальный свайп — перемотка с предпросмотром времени. Вертикальный свайп слева — яркость, справа — громкость плеера.").font(.footnote).foregroundStyle(.secondary)
+                Text("Двойное касание слева или справа — ±10 секунд. Горизонтальный свайп — перемотка с предпросмотром времени. Вертикальный свайп слева — яркость, справа — громкость плеера. Разведите два пальца для увеличения видео; кнопка 1:1 возвращает исходный размер.").font(.footnote).foregroundStyle(.secondary)
             }
         }
     }

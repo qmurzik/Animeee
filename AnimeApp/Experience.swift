@@ -90,7 +90,8 @@ struct WatchRequest: Identifiable {
     let video: YaniVideo
     let videos: [YaniVideo]
 }
-struct VoicePicker: View {
+struct VoicePicker: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.selected == rhs.selected && lhs.episode == rhs.episode && lhs.videos.map(\.id) == rhs.videos.map(\.id) }
     let videos: [YaniVideo]
     let selected: String
     var episode: String? = nil
@@ -127,7 +128,8 @@ struct VoicePicker: View {
         }
     }
 }
-struct EpisodeGrid: View {
+struct EpisodeGrid: View, Equatable {
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.currentID == rhs.currentID && lhs.animeID == rhs.animeID && lhs.videos.map(\.id) == rhs.videos.map(\.id) }
     let videos: [YaniVideo]
     let currentID: Int?
     let animeID: Int

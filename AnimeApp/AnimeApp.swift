@@ -57,7 +57,7 @@ struct AppRoute: View {
         #if DEBUG
         if let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"], ["aksor", "cvh"].contains(probe) {
             PlaybackProbeView(mode: probe)
-        } else if ProcessInfo.processInfo.environment["ANIMEAPP_SCREEN"] == "detail" { NavigationStack { DetailView(id: -111) } } else { RootView() }
+        } else if ProcessInfo.processInfo.environment["ANIMEAPP_SCREEN"] == "detail" { NavigationStack { DetailView(id: -119) } } else { RootView() }
         #else
         RootView()
         #endif
@@ -71,9 +71,20 @@ struct PlaybackProbeView: View {
         if mode == "aksor" { return YaniVideo(video_id: 709233, data: .init(player: "Aksor", dubbing: "SHIZA Project"), number: "1", iframe_url: "https://player.aksor.tv/video/8d4b9ff83b37b94e542c49fa3a8d2286") }
         return YaniVideo(video_id: 1310106, data: .init(player: "CVH", dubbing: "FumoDub"), number: "1", iframe_url: "https://ru.yummyani.me/iframeCVH.html?dubbing_code=FumoDub&anime_id=51404&episode=1")
     }
+    @State private var context: WatchRequest?
     var body: some View {
-        let anime = Anime(id: -100, mal: nil, name: .init(main: "Проверка потока \(mode.uppercased())", english: nil), poster: nil, description: nil, year: nil, episodes: nil)
-        NavigationStack { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: [video]) }
+        NavigationStack {
+            if let context { MultiSourcePlayerScreen(sourceAnime: context.anime, video: context.video, videos: context.videos) }
+            else { ProgressView("Загружаем тестовый тайтл…") }
+        }.task {
+            guard context == nil else { return }
+            if mode == "aksor", let anime = try? await YaniAPI.detail(119), let all = try? await YaniAPI.videos(119), let actual = all.first(where: { $0.id == video.id }) {
+                context = WatchRequest(anime: anime, video: actual, videos: all.filter { $0.supportsNativePlayback })
+            } else {
+                let anime = Anime(id: -100, mal: nil, name: .init(main: "Проверка потока \(mode.uppercased())", english: nil), poster: nil, description: nil, year: nil, episodes: nil)
+                context = WatchRequest(anime: anime, video: video, videos: [video])
+            }
+        }
     }
 }
 #endif
@@ -384,6 +395,7 @@ struct AksorResolver {
 @MainActor final class MultiSourcePlayback: ObservableObject {
     let anime: Anime
     let videos: [YaniVideo]
+    private let queues: [String: [YaniVideo]]
     let player = VLCMediaPlayer()
     @Published var selected: YaniVideo
     @Published var choices: [StreamChoice] = []
@@ -409,8 +421,8 @@ struct AksorResolver {
     var audioTracks: [(id: Int32, name: String)] { tracks(player.audioTrackIndexes as? [NSNumber] ?? [], player.audioTrackNames as? [String] ?? []) }
     var subtitleTracks: [(id: Int32, name: String)] { tracks(player.videoSubTitlesIndexes as? [NSNumber] ?? [], player.videoSubTitlesNames as? [String] ?? []) }
     private func tracks(_ ids: [NSNumber], _ names: [String]) -> [(id: Int32, name: String)] { ids.enumerated().compactMap { index, id in names.indices.contains(index) ? (id.int32Value, id.int32Value == -1 ? "Выключено" : names[index]) : nil } }
-    var episodes: [YaniVideo] { orderedEpisodes(videos.filter { $0.groupKey == selected.groupKey }) }
-    init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; selected = video; quality = UserDefaults.standard.string(forKey: "defaultQuality") ?? "720p"; let saved = UserDefaults.standard.float(forKey: "playbackRate"); rate = (0.5...2).contains(saved) ? saved : 1 }
+    var episodes: [YaniVideo] { queues[selected.groupKey] ?? [] }
+    init(anime: Anime, videos: [YaniVideo], video: YaniVideo) { self.anime = anime; self.videos = videos; queues = Dictionary(grouping: videos, by: \.groupKey).mapValues { orderedEpisodes($0) }; selected = video; quality = UserDefaults.standard.string(forKey: "defaultQuality") ?? "720p"; let saved = UserDefaults.standard.float(forKey: "playbackRate"); rate = (0.5...2).contains(saved) ? saved : 1 }
     func start() {
         guard poll == nil else { return }
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
@@ -418,7 +430,7 @@ struct AksorResolver {
         poll = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in Task { @MainActor in self?.tick() } }
         select(selected)
     }
-    func stop() { save(); task?.cancel(); poll?.invalidate(); poll = nil; player.stop(); player.drawable = nil; UIApplication.shared.isIdleTimerDisabled = false }
+    func stop() { save(); task?.cancel(); poll?.invalidate(); poll = nil; player.stop(); player.drawable = nil; UIApplication.shared.isIdleTimerDisabled = false; try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
     func save() {
         guard !finished, pendingSeek == nil, seconds > 0, seconds.isFinite else { return }
         UserDefaults.standard.set(seconds, forKey: key)
@@ -457,7 +469,7 @@ struct AksorResolver {
         task = Task { do { try await open(stream, position: position) } catch { if !Task.isCancelled { self.error = error.localizedDescription; loading = false } } }
     }
     func chooseVoice(_ name: String) {
-        guard let video = videos.first(where: { $0.groupKey == name && episodeIdentity($0.number) == episodeIdentity(selected.number) }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
+        guard let video = queues[name]?.first(where: { episodeIdentity($0.number) == episodeIdentity(selected.number) }) else { error = "В этой озвучке нет текущей серии. Выберите другую серию."; return }
         select(video, preservePosition: true)
     }
     var hasPrevious: Bool { guard let index = episodes.firstIndex(where: { $0.id == selected.id }) else { return false }; return index > 0 }
@@ -470,7 +482,7 @@ struct AksorResolver {
     func setRate(_ value: Float) { guard (0.5...2).contains(value) else { return }; rate = value; player.rate = value; UserDefaults.standard.set(value, forKey: "playbackRate") }
     func toggle() { if finished { select(selected); return }; if player.isPlaying { player.pause() } else { player.play(); player.rate = rate } }
     func tick() {
-        playing = player.isPlaying; seekable = player.isSeekable
+        if playing != player.isPlaying { playing = player.isPlaying; UIApplication.shared.isIdleTimerDisabled = playing }; if seekable != player.isSeekable { seekable = player.isSeekable }
         if player.state == .buffering && !playing { loading = true }
         if player.state == .paused { loading = false }
         if player.state == .error { error = "Не удалось воспроизвести поток. Попробуйте повторить или выбрать другой источник."; loading = false }

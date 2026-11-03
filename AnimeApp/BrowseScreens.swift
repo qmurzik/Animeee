@@ -7,7 +7,7 @@ struct RootView: View {
             SearchView().tabItem { Label("Поиск", systemImage: "magnifyingglass") }
             LibraryView().tabItem { Label("Моё", systemImage: "bookmark.fill") }
             SettingsView().tabItem { Label("Настройки", systemImage: "slider.horizontal.3") }
-        }.tint(Cinema.accent).toolbarBackground(Cinema.background, for: .tabBar)
+        }.tint(Cinema.accent).statusBarHidden(false).toolbarBackground(Cinema.background, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
     }
 }
 struct CoverCard: View {
@@ -37,7 +37,6 @@ struct CatalogView: View {
                         Spacer()
                         NavigationLink { YaniAccountView() } label: { Image(systemName: SessionKeychain.read() == nil ? "person.crop.circle" : "person.crop.circle.fill").font(.title2).foregroundStyle(Cinema.accent).frame(width: 44, height: 44).background(Cinema.surface, in: Circle()) }.accessibilityLabel("Аккаунт YummyAnime")
                     }.padding(.horizontal, 20)
-                    if let hero = items.first { HomeHero(anime: hero).padding(.horizontal, 20) }
                     if !history.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
                             HStack { Text("Продолжить смотреть").font(.title3.bold()); Spacer(); Image(systemName: "clock.arrow.circlepath").foregroundStyle(Cinema.muted) }.padding(.horizontal, 20)
@@ -50,6 +49,7 @@ struct CatalogView: View {
                             }
                         }
                     }
+                    if let hero = items.first { HomeHero(anime: hero).padding(.horizontal, 20) }
                     if let error { VStack(alignment: .leading, spacing: 10) { Text(error).font(.footnote).foregroundStyle(Cinema.muted); Button("Попробовать снова") { Task { await load() } }.buttonStyle(.bordered) }.padding(.horizontal, 20) }
                     if items.isEmpty && error == nil { ProgressView().frame(maxWidth: .infinity).padding(60) }
                     if items.count > 1 {
@@ -145,6 +145,8 @@ struct DetailView: View {
     @State private var expanded = false
     @State private var request: WatchRequest?
     @State private var didAutoplay = false
+    @State private var accountSheet = false
+    @AppStorage("yaniRevision") private var sessionRevision = ""
     private var selectedEpisodes: [YaniVideo] { orderedEpisodes(videos.filter { $0.groupKey == group }) }
     private var resume: YaniVideo? {
         let last = HistoryStore.load().first { $0.id == id }
@@ -167,7 +169,7 @@ struct DetailView: View {
                             EpisodeGrid(videos: selectedEpisodes, currentID: resume?.id, animeID: anime.id) { open($0, anime) }
                         }
                         if loading { HStack { ProgressView(); Text("Ищем доступные серии…").font(.subheadline).foregroundStyle(Cinema.muted) }.padding(.vertical) }
-                        if let error { VStack(alignment: .leading, spacing: 8) { Text(error).font(.subheadline).foregroundStyle(Cinema.muted); Button("Повторить загрузку серий") { Task { await loadVideos(anime) } } }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }
+                        if let error { VStack(alignment: .leading, spacing: 8) { Text(error).font(.subheadline).foregroundStyle(Cinema.muted); Button("Повторить загрузку серий") { Task { await loadVideos(anime) } }; if SessionKeychain.read() == nil { Button("Войти в YummyAnime") { accountSheet = true } } }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 16)) }
                         if let episode = anime.episodes?.first(where: { !$0.streams.isEmpty }) { NavigationLink { PlayerScreen(anime: anime, episode: episode) } label: { Label("Смотреть AniLibria", systemImage: "play.fill").font(.headline).padding() } }
                         LibraryControls(anime: anime)
                         VStack(alignment: .leading, spacing: 10) {
@@ -183,6 +185,8 @@ struct DetailView: View {
         .sheet(isPresented: $voiceSheet) {
             NavigationStack { ScrollView { VoicePicker(videos: videos, selected: group) { group = $0; UserDefaults.standard.set(group, forKey: "voice.\(id)"); voiceSheet = false }.padding(20) }.background(Cinema.background).navigationTitle("Озвучки").navigationBarTitleDisplayMode(.inline).toolbar { Button("Готово") { voiceSheet = false } } }.presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
         }
+        .sheet(isPresented: $accountSheet) { NavigationStack { YaniAccountView().toolbar { Button("Готово") { accountSheet = false } } } }
+        .onChange(of: sessionRevision) { _, _ in if let anime { Task { await loadVideos(anime) } } }
         .fullScreenCover(item: $request) { request in MultiSourcePlayerScreen(sourceAnime: request.anime, video: request.video, videos: request.videos) }
         .task { if anime == nil { await load() } }
     }

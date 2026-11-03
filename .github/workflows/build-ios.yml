@@ -68,6 +68,7 @@ jobs:
               f.write('SIMULATOR_ID=' + selected['udid'] + '\n')
           PY
       - name: Build and launch on simulator
+        timeout-minutes: 15
         run: |
           xcodebuild -project AnimeApp.xcodeproj -scheme AnimeApp -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=NO build
           xcrun simctl boot "$SIMULATOR_ID" || true
@@ -108,12 +109,16 @@ jobs:
             cat "probe-$source.log"
             test "$detected" = 1
           done
+          SIMCTL_CHILD_ANIMEAPP_LANDSCAPE=0 SIMCTL_CHILD_ANIMEAPP_PANEL=voices SIMCTL_CHILD_ANIMEAPP_PROBE=aksor xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
+          sleep 15
+          xcrun simctl io "$SIMULATOR_ID" screenshot voices.png
       - uses: actions/upload-artifact@v4
         with:
           name: simulator-home
           path: |
             home.png
             detail.png
+            voices.png
             player-*.png
             probe-*.log
       - name: Collect simulator diagnostics
@@ -137,7 +142,7 @@ jobs:
         run: |
           tag="build-${{ github.run_number }}"
           for attempt in 1 2 3; do gh release view "$tag" >/dev/null 2>&1 && break; sleep 10; done
-          for artifact in home.png detail.png player-*.png probe-*.log; do
+          for artifact in home.png detail.png voices.png player-*.png probe-*.log; do
             if test -f "$artifact"; then gh release upload "$tag" "$artifact" --clobber; fi
           done
           if test -d diagnostics; then tar -czf simulator-diagnostics.tgz diagnostics; gh release upload "$tag" simulator-diagnostics.tgz --clobber; fi
