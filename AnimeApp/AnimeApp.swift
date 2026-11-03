@@ -375,7 +375,7 @@ struct DetailView: View {
                     ZStack(alignment: .bottomLeading) {
                         AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Color.purple.opacity(0.2) }.frame(maxWidth: .infinity).frame(height: 330).clipped()
                         LinearGradient(colors: [.clear, .black.opacity(0.35), Color(red: 0.045, green: 0.04, blue: 0.075)], startPoint: .top, endPoint: .bottom)
-                        VStack(alignment: .leading, spacing: 6) { Text(anime.id < 0 ? "YUMMYANIME" : "ANILIBRIA").font(.caption.bold()).tracking(2).foregroundStyle(.purple); Text(anime.name.main).font(.largeTitle.bold()).lineLimit(3); if let year = anime.year { Text("\(String(year))  •  \(anime.episodes?.count ?? 0) серий").font(.subheadline).foregroundStyle(.secondary) } }.padding(20)
+                        VStack(alignment: .leading, spacing: 6) { Text(anime.id < 0 ? "YUMMYANIME" : "ANILIBRIA").font(.caption.bold()).tracking(2).foregroundStyle(.purple); Text(anime.name.main).font(.largeTitle.bold()).lineLimit(3); if let year = anime.year { Text(anime.id < 0 ? "\(String(year))  •  YummyAnime" : "\(String(year))  •  \(anime.episodes?.count ?? 0) серий").font(.subheadline).foregroundStyle(.secondary) } }.padding(20)
                     }.frame(height: 330).clipped()
                     VStack(alignment: .leading, spacing: 20) {
                         if let last = history.first(where: { $0.id == anime.id }), let episode = anime.episodes?.first(where: { $0.id == last.episodeID }) {
