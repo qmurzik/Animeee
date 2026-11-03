@@ -48,8 +48,33 @@ struct Libria: AnimeProvider {
     func release(_ id: Int) async throws -> Anime { try await fetch("anime/releases/\(id)") }
 }
 @main struct AnimeApp: App {
-    var body: some Scene { WindowGroup { RootView().preferredColorScheme(.dark).tint(.purple) } }
+    var body: some Scene { WindowGroup { AppRoute().preferredColorScheme(.dark).tint(.purple) } }
 }
+struct AppRoute: View {
+    var body: some View {
+        #if DEBUG
+        if let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"], ["aksor", "cvh"].contains(probe) {
+            PlaybackProbeView(mode: probe)
+        } else { RootView() }
+        #else
+        RootView()
+        #endif
+    }
+}
+#if DEBUG
+// CI-only launch route; excluded from the release IPA.
+struct PlaybackProbeView: View {
+    let mode: String
+    var video: YaniVideo {
+        if mode == "aksor" { return YaniVideo(video_id: 709233, data: .init(player: "Aksor", dubbing: "SHIZA Project"), number: "1", iframe_url: "https://player.aksor.tv/video/8d4b9ff83b37b94e542c49fa3a8d2286") }
+        return YaniVideo(video_id: 1310106, data: .init(player: "CVH", dubbing: "FumoDub"), number: "1", iframe_url: "https://ru.yummyani.me/iframeCVH.html?dubbing_code=FumoDub&anime_id=51404&episode=1")
+    }
+    var body: some View {
+        let anime = Anime(id: -100, mal: nil, name: .init(main: "Проверка потока \(mode.uppercased())", english: nil), poster: nil, description: nil, year: nil, episodes: nil)
+        NavigationStack { MultiSourcePlayerScreen(sourceAnime: anime, video: video, videos: [video]) }
+    }
+}
+#endif
 struct RootView: View {
     var body: some View {
         TabView {
@@ -73,7 +98,7 @@ struct CoverCard: View {
         VStack(alignment: .leading, spacing: 8) {
             AsyncImage(url: anime.imageURL) { $0.resizable().scaledToFill() } placeholder: { Rectangle().fill(.white.opacity(0.06)).overlay { Image(systemName: "sparkles.tv").foregroundStyle(.white.opacity(0.3)) } }
                 .frame(width: 140, height: 200).clipped().clipShape(RoundedRectangle(cornerRadius: 14))
-            Text(anime.name.main).font(.subheadline.weight(.semibold)).lineLimit(2).frame(width: 140, alignment: .leading)
+            Text(anime.name.main).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true).frame(width: 140, alignment: .leading)
             if let year = anime.year { Text(String(year)).font(.caption).foregroundStyle(.secondary) }
         }.frame(width: 140, alignment: .topLeading)
     }
@@ -88,7 +113,7 @@ struct CatalogView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 24) {
                     HStack(alignment: .center) {
-                        VStack(alignment: .leading, spacing: 4) { Text("ANIME / APP").font(.caption.weight(.bold)).tracking(2).foregroundStyle(.purple); Text("Хорошо, что ты здесь").font(.title2.bold()) }
+                        VStack(alignment: .leading, spacing: 4) { Text("ANIME / APP").font(.caption.weight(.bold)).tracking(2).foregroundStyle(.purple); Text("Сегодня в кадре").font(.title2.bold()) }
                         Spacer(); Image(systemName: "sparkles").font(.title2).foregroundStyle(.purple)
                     }.padding(.horizontal)
                     if let last = history.first {
@@ -101,11 +126,11 @@ struct CatalogView: View {
                     if !items.isEmpty {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack { VStack(alignment: .leading, spacing: 3) { Text("Свежие релизы").font(.title2.bold()); Text("Обновления AniLibria").font(.caption).foregroundStyle(.secondary) }; Spacer() }.padding(.horizontal)
-                            ScrollView(.horizontal, showsIndicators: false) { LazyHStack(alignment: .top, spacing: 12) { ForEach(items) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) } }.padding(.horizontal) }
+                            ScrollView(.horizontal, showsIndicators: false) { LazyHStack(alignment: .top, spacing: 12) { ForEach(Array(items.prefix(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) } }.padding(.horizontal) }
                         }
-                        Text("Каталог").font(.title2.bold()).padding(.horizontal)
-                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 18) {
-                            ForEach(items) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) }
+                        Text("Ещё в каталоге").font(.title2.bold()).padding(.horizontal)
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], alignment: .center, spacing: 18) {
+                            ForEach(Array(items.dropFirst(8))) { anime in NavigationLink { DetailView(id: anime.id) } label: { CoverCard(anime: anime) }.buttonStyle(.plain) }
                         }.padding(.horizontal)
                     }
                 }.padding(.top, 12).padding(.bottom, 30)
@@ -176,7 +201,7 @@ struct DetailView: View {
                     }.padding(.horizontal, 20)
                 }.padding(.bottom, 30)
             } else if let error { ContentUnavailableView("Источник недоступен", systemImage: "wifi.exclamationmark", description: Text(error)) } else { ProgressView().padding() }
-        }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).navigationBarTitleDisplayMode(.inline).task { do { anime = try await Libria().release(id) } catch { self.error = error.localizedDescription } }
+        }.background(Color(red: 0.045, green: 0.04, blue: 0.075)).toolbar(.visible, for: .navigationBar).navigationBarTitleDisplayMode(.inline).task { do { anime = try await Libria().release(id) } catch { self.error = error.localizedDescription } }
     }
 }
 struct YaniSearchResponse: Decodable {
@@ -364,6 +389,7 @@ struct AksorResolver {
     private var task: Task<Void, Never>?
     private var pendingSeek: Double?
     private var tickCount = 0
+    private var reportedFrame = false
     var key: String { "progress.\(anime.id).yani-\(selected.id)" }
     var voices: [String] { Array(Set(videos.map(\.groupKey))).sorted() }
     var episodes: [YaniVideo] { videos.filter { $0.groupKey == selected.groupKey }.sorted { ($0.number ?? "").localizedStandardCompare($1.number ?? "") == .orderedAscending } }
@@ -430,6 +456,12 @@ struct AksorResolver {
             if let position = pendingSeek { if player.isSeekable { pendingSeek = nil; seek(position) }; return }
             seconds = max(0, Double(player.time.intValue) / 1000)
             duration = max(0, Double(player.media?.length.intValue ?? 0) / 1000)
+            #if DEBUG
+            if !reportedFrame, seconds > 2, player.hasVideoOut, let probe = ProcessInfo.processInfo.environment["ANIMEAPP_PROBE"] {
+                reportedFrame = true
+                NSLog("ANIMEAPP_FRAME_%@ seconds=%.2f", probe, seconds)
+            }
+            #endif
             tickCount += 1; if tickCount % 10 == 0 { save() }
         }
         if player.state == .ended, UserDefaults.standard.object(forKey: "autoNext") as? Bool ?? true { next() }
