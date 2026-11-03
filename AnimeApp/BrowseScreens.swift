@@ -151,7 +151,7 @@ struct DetailView: View {
     private var resume: YaniVideo? {
         let last = HistoryStore.load().first { $0.id == id }
         let remembered = last.flatMap { entry in Int(entry.episodeID.replacingOccurrences(of: "yani-", with: "")) }
-        guard let chosen = PlaybackMath.resumeID(selectedEpisodes.map(\.id), remembered: remembered) else { return nil }
+        guard let chosen = PlaybackMath.resumeID(selectedEpisodes.map(\.id), remembered: remembered, numbers: selectedEpisodes.map(\.number), episode: last?.episodeNumber.map { String($0) }) else { return nil }
         return selectedEpisodes.first { $0.id == chosen }
     }
     var body: some View {
@@ -161,8 +161,8 @@ struct DetailView: View {
                     detailHero(anime)
                     VStack(alignment: .leading, spacing: 23) {
                         if let video = resume {
-                            let position = UserDefaults.standard.double(forKey: "progress.\(anime.id).yani-\(video.id)")
-                            PrimaryWatchButton(title: position > 0 ? "Продолжить · серия \(video.number ?? "—")" : "Смотреть · серия \(video.number ?? "—")", subtitle: video.voiceName + (position > 0 ? " · с " + playbackClock(position) : "")) { open(video, anime) }
+                            let position = resumePosition(video)
+                            PrimaryWatchButton(title: position > 0 ? "Продолжить · серия \(video.number ?? "—")" : "Смотреть · серия \(video.number ?? "—")", subtitle: video.voiceName + (position > 0 ? " · с " + playbackClock(position) : "")) { open(video, anime, transferPosition: true) }
                             Button { voiceSheet = true } label: {
                                 HStack(spacing: 12) { Image(systemName: "waveform").foregroundStyle(Cinema.accent).frame(width: 30); VStack(alignment: .leading, spacing: 4) { Text(video.voiceName).font(.subheadline.bold()).foregroundStyle(.white); Text("\(video.playerName) · \(VoicePreferences.sortedGroups(videos).count) вариантов озвучки").font(.caption).foregroundStyle(Cinema.muted) }; Spacer(); Image(systemName: "chevron.up.chevron.down").foregroundStyle(Cinema.muted) }.padding(16).background(Cinema.surface, in: RoundedRectangle(cornerRadius: 17))
                             }.buttonStyle(.plain)
@@ -200,7 +200,18 @@ struct DetailView: View {
             }.frame(maxWidth: .infinity, alignment: .leading)
         }.padding(20).frame(maxWidth: .infinity, alignment: .leading).background(LinearGradient(colors: [Cinema.accent.opacity(0.12), Cinema.background], startPoint: .topLeading, endPoint: .bottomTrailing))
     }
-    private func open(_ video: YaniVideo, _ anime: Anime) { request = WatchRequest(anime: anime, video: video, videos: videos) }
+    private func resumePosition(_ video: YaniVideo) -> Double {
+        let saved = UserDefaults.standard.double(forKey: "progress.\(id).yani-\(video.id)")
+        if saved > 0 { return saved }
+        guard let last = HistoryStore.load().first(where: { $0.id == id }), last.episodeID != "yani-\(video.id)",
+              let number = last.episodeNumber, episodeIdentity(String(number)) == episodeIdentity(video.number),
+              last.seconds > 0, last.duration == nil || last.seconds < (last.duration ?? 0) - 10 else { return 0 }
+        return last.seconds
+    }
+    private func open(_ video: YaniVideo, _ anime: Anime, transferPosition: Bool = false) {
+        if transferPosition { let position = resumePosition(video); if position > 0 { UserDefaults.standard.set(position, forKey: "progress.\(id).yani-\(video.id)") } }
+        request = WatchRequest(anime: anime, video: video, videos: videos)
+    }
     private func load() async {
         error = nil; loading = true
         do { let result = id < 0 ? try await YaniAPI.detail(-id) : try await Libria().release(id); anime = result; await loadVideos(result) } catch { self.error = error.localizedDescription; loading = false }
@@ -216,7 +227,7 @@ struct DetailView: View {
             let lastGroup = videos.first { "yani-\($0.id)" == last?.episodeID }?.groupKey
             group = groups.contains(saved) ? saved : lastGroup ?? groups.first ?? ""
             if videos.isEmpty { error = "Источник не вернул совместимых видео Aksor/CVH. Доступность зависит от тайтла и аккаунта." }
-            if autoplay && !didAutoplay, let video = resume { didAutoplay = true; open(video, anime) }
+            if autoplay && !didAutoplay, let video = resume { didAutoplay = true; open(video, anime, transferPosition: true) }
         } catch { self.error = error.localizedDescription }
     }
     private func cleanDescription(_ text: String?) -> String { (text ?? "Описание пока отсутствует").replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression).replacingOccurrences(of: "&nbsp;", with: " ").replacingOccurrences(of: "&quot;", with: "\"").replacingOccurrences(of: "&amp;", with: "&") }

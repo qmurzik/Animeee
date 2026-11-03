@@ -27,4 +27,11 @@ final class WatchCoreTests: XCTestCase {
         XCTAssertEqual(PlaybackMath.resumeID([17, 23, 30], remembered: 99), 17)
         XCTAssertNil(PlaybackMath.resumeID([], remembered: 23))
     }
+    func testChangingVoiceKeepsEpisodeInsteadOfJumpingToFirst() {
+        XCTAssertEqual(PlaybackMath.resumeID([101, 102, 103], remembered: 23, numbers: ["1", "02", "3"], episode: "2.0"), 102)
+        XCTAssertEqual(PlaybackMath.resumeID([101, 102], remembered: 101, numbers: ["1", "2"], episode: "2"), 101)
+        XCTAssertEqual(PlaybackMath.resumeID([101, 102], remembered: 23, numbers: ["1", "2"], episode: "20"), 101)
+        XCTAssertEqual(PlaybackMath.resumeID([101], remembered: nil, numbers: ["1", "2"], episode: "2"), 101)
+    }
+
 }

@@ -19,8 +19,10 @@ enum PlaybackMath {
         guard proposed.isFinite else { return 0 }
         return max(0, min(proposed, duration.isFinite && duration > 0 ? min(duration, 2_000_000) : 2_000_000))
     }
-    static func resumeID(_ ids: [Int], remembered: Int?) -> Int? {
+    static func resumeID(_ ids: [Int], remembered: Int?, numbers: [String?] = [], episode: String? = nil) -> Int? {
         if let remembered, ids.contains(remembered) { return remembered }
+        if let episode, !EpisodeNumber.canonical(episode).isEmpty,
+           let index = numbers.firstIndex(where: { EpisodeNumber.canonical($0) == EpisodeNumber.canonical(episode) }), ids.indices.contains(index) { return ids[index] }
         return ids.first
     }
 }
