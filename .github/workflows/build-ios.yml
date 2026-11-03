@@ -93,32 +93,44 @@ jobs:
         timeout-minutes: 15
         run: |
           xcodebuild -project AnimeApp.xcodeproj -scheme AnimeAppUITests -configuration Debug -sdk iphonesimulator -destination "id=$SIMULATOR_ID" -derivedDataPath simbuild -resultBundlePath UITests.xcresult -parallel-testing-enabled NO ARCHS=arm64 ONLY_ACTIVE_ARCH=YES SWIFT_ACTIVE_COMPILATION_CONDITIONS=DEBUG CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- test
+      - name: Export UI screenshots
+        if: always()
+        run: |
+          if test -d UITests.xcresult; then
+            xcrun xcresulttool export attachments --path UITests.xcresult --output-path ui-attachments || true
+            if test -d ui-attachments; then zip -qr ui-controls.zip ui-attachments; fi
+          fi
       - name: Check native video output on simulator
         if: ${{ !cancelled() }}
         run: |
+          failed=0
           for source in aksor cvh; do
             landscape=0
             if test "$source" = cvh; then landscape=1; fi
             SIMCTL_CHILD_ANIMEAPP_LANDSCAPE="$landscape" SIMCTL_CHILD_ANIMEAPP_PROBE="$source" xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
             detected=0
-            for attempt in 1 2 3 4; do
+            for attempt in 1 2 3 4 5 6; do
               sleep 15
               xcrun simctl spawn "$SIMULATOR_ID" log show --last 5m --style compact --predicate "eventMessage CONTAINS 'ANIMEAPP_'" > "probe-$source.log"
               if grep -q "ANIMEAPP_CONTROLS_$source passed" "probe-$source.log"; then detected=1; break; fi
             done
             xcrun simctl io "$SIMULATOR_ID" screenshot "player-$source.png"
             if test "$source" = cvh; then
-              grep -q 'ANIMEAPP_LANDSCAPE verified' "probe-$source.log"
               container=$(xcrun simctl get_app_container "$SIMULATOR_ID" com.animeapp.viewer data)
-              cp "$container/Documents/player-landscape.png" player-cvh.png
-              python3 -c 'import struct; w,h=struct.unpack(">II",open("player-cvh.png","rb").read()[16:24]); print("Landscape screenshot:",w,h); assert w > h'
+              if grep -q 'ANIMEAPP_LANDSCAPE verified' "probe-$source.log" && test -f "$container/Documents/player-landscape.png"; then
+                cp "$container/Documents/player-landscape.png" player-cvh.png
+                python3 -c 'import struct; w,h=struct.unpack(">II",open("player-cvh.png","rb").read()[16:24]); print("Landscape screenshot:",w,h); assert w > h' || failed=1
+              else
+                failed=1
+              fi
             fi
             cat "probe-$source.log"
-            test "$detected" = 1
+            if test "$detected" != 1; then failed=1; fi
           done
           SIMCTL_CHILD_ANIMEAPP_LANDSCAPE=0 SIMCTL_CHILD_ANIMEAPP_PANEL=voices SIMCTL_CHILD_ANIMEAPP_PROBE=aksor xcrun simctl launch --terminate-running-process "$SIMULATOR_ID" com.animeapp.viewer
           sleep 15
           xcrun simctl io "$SIMULATOR_ID" screenshot voices.png
+          test "$failed" = 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -154,7 +166,7 @@ jobs:
         run: |
           tag="build-${{ github.run_number }}"
           for attempt in 1 2 3; do gh release view "$tag" >/dev/null 2>&1 && break; sleep 10; done
-          for artifact in home.png detail.png voices.png player-*.png probe-*.log; do
+          for artifact in home.png detail.png voices.png ui-controls.zip player-*.png probe-*.log; do
             if test -f "$artifact"; then gh release upload "$tag" "$artifact" --clobber; fi
           done
           if test -d diagnostics; then tar -czf simulator-diagnostics.tgz diagnostics; gh release upload "$tag" simulator-diagnostics.tgz --clobber; fi

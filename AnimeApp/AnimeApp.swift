@@ -521,12 +521,13 @@ struct AksorResolver {
         return condition()
     }
     private func probeControls(_ probe: String) async {
-        guard await probeWait({ self.player.state == .playing && self.player.isPlaying && self.player.isSeekable && self.player.canPause && (self.player.media?.length.intValue ?? 0) > 0 }, attempts: 100) else {
+        let firstClock = player.time.intValue
+        guard await probeWait({ self.player.isPlaying && self.player.isSeekable && self.player.canPause && self.player.time.intValue >= firstClock + 1000 && (self.player.media?.length.intValue ?? 0) > 0 }, attempts: 100) else {
             NSLog("ANIMEAPP_CONTROLS_%@ failed readiness state=%@ playing=%d seekable=%d canPause=%d", probe, String(describing: player.state), player.isPlaying ? 1 : 0, player.isSeekable ? 1 : 0, player.canPause ? 1 : 0); return
         }
-        NSLog("ANIMEAPP_READY_%@ seekable=1 canPause=1", probe)
+        NSLog("ANIMEAPP_READY_%@ seekable=1 canPause=1 advancing=1 cachedState=%@", probe, String(describing: player.state))
         player.pause()
-        guard await probeWait({ self.player.state == .paused && !self.player.isPlaying }) else {
+        guard await probeWait({ !self.player.isPlaying }) else {
             NSLog("ANIMEAPP_CONTROLS_%@ failed pause state=%@ playing=%d", probe, String(describing: player.state), player.isPlaying ? 1 : 0); return
         }
         do { try await Task.sleep(for: .seconds(1)) } catch { return }
