@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1020">
+<meta name="description" content="AdBlock Lab: безопасный полигон для тестирования косметических и сетевых правил блокировщиков рекламы. Никакой настоящей рекламы и трекинга.">
+<title>AdBlock Lab — безопасный тест блокировщика</title>
+<style>
+:root{color-scheme:dark;--bg:#0d1020;--panel:#171b30;--panel2:#1c223b;--stroke:#303650;--text:#f4f5ff;--muted:#9faac6;--violet:#a98aff;--teal:#59dbb8;--red:#ff869b;--yellow:#ffd38a}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:radial-gradient(ellipse 90% 680px at 80% -12%,#2e285c 0%,transparent 68%),radial-gradient(ellipse 65% 450px at 4% 17%,#10334b 0%,transparent 80%),var(--bg);color:var(--text);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+button:focus-visible,a:focus-visible{outline:3px solid #bb9cff;outline-offset:3px}
+.wrap{width:min(1180px,calc(100% - 36px));margin-inline:auto}
+.top{position:sticky;top:0;z-index:50;background:rgba(13,16,32,.84);backdrop-filter:blur(16px);border-bottom:1px solid rgba(255,255,255,.08)}
+.top-inner{display:flex;align-items:center;justify-content:space-between;gap:20px;min-height:69px}
+.brand{display:flex;align-items:center;gap:11px;font-size:17px;font-weight:840;letter-spacing:-.55px;white-space:nowrap}
+.symbol{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:linear-gradient(140deg,#ab8bff,#5c89f7);color:#fff;font-size:23px;box-shadow:0 0 28px #9c6bff30}
+.brand small{font-size:10px;vertical-align:middle;color:var(--teal);margin-left:6px;letter-spacing:1.2px;font-weight:780}
+nav{display:flex;gap:24px;font-size:13px;color:#afbad6;font-weight:600}
+nav a:hover{color:#fff}
+main{padding-bottom:140px}
+.hero{padding:70px 0 32px;max-width:950px}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;color:#bca8ff;background:#a98aff16;border:1px solid #a98aff3e;padding:6px 11px;border-radius:999px;font-size:11px;letter-spacing:1.1px;font-weight:850;text-transform:uppercase}
+.dot{width:7px;height:7px;border-radius:50%;background:#65eac2;box-shadow:0 0 12px #65eac2}
+h1{font-size:clamp(36px,5.5vw,67px);line-height:1.05;letter-spacing:-2.5px;max-width:870px;margin:21px 0 18px;font-weight:880}
+h1 span{background:linear-gradient(90deg,#bba6ff,#76d9df);background-clip:text;color:transparent}
+.lead{max-width:720px;color:#b2bcd4;font-size:17px;line-height:1.7;margin:0 0 24px}
+.hintline{display:flex;align-items:center;gap:9px;color:#a5b5c8;font-size:12px}
+.hintline svg{flex-shrink:0}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:27px}
+.btn{display:inline-flex;justify-content:center;align-items:center;gap:9px;border:1px solid var(--stroke);border-radius:12px;padding:12px 17px;font-weight:760;font-size:13px;color:#edf0ff;background:#232941;transition:transform .15s,background .15s,border-color .15s}
+.btn:hover{transform:translateY(-1px);background:#2a3350;border-color:#62719a}
+.btn-primary{background:linear-gradient(120deg,#9e7ef4,#6b7af6);border-color:transparent;color:white;box-shadow:0 7px 28px #8866fb30}
+.btn-primary:hover{background:linear-gradient(120deg,#b292ff,#788afb)}
+.section-head{display:flex;justify-content:space-between;align-items:end;gap:15px;margin:39px 0 16px}
+.section-head h2{margin:0;font-size:22px;letter-spacing:-.7px}
+.section-head p{margin:4px 0 0;color:var(--muted);font-size:13px}
+.section-tag{font-size:11px;font-weight:800;letter-spacing:.6px;border:1px solid var(--stroke);border-radius:999px;padding:6px 11px;color:#aebbd5;white-space:nowrap}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.stat{padding:20px 20px 17px;background:linear-gradient(140deg,#1d233a,#171a2c);border:1px solid #333a52;border-radius:17px;min-width:0}
+.stat-label{display:flex;align-items:center;gap:9px;color:#b8c2dc;font-size:12px;font-weight:680}
+.stat-value{font-size:35px;font-weight:830;letter-spacing:-1.2px;margin-top:6px;line-height:1.2;font-variant-numeric:tabular-nums}
+.stat:nth-child(2) .stat-value{color:var(--teal)}
+.stat:nth-child(3) .stat-value{color:var(--red)}
+.stat:nth-child(4) .stat-value{color:#c1aaff}
+.meter{height:7px;background:#30374d;border-radius:10px;overflow:hidden;margin-top:18px;display:flex}
+.meter div{width:0;transition:width .3s}
+#bar-blocked{background:#58dbb5}#bar-visible{background:#f8a58c}
+.formats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.specimen{min-width:0;border:1px solid #313952;background:#171b2f;border-radius:17px;overflow:hidden;position:relative}
+.specimen-top{padding:15px 16px 0;display:flex;justify-content:space-between;gap:8px;align-items:start}
+.specimen-title{font-weight:760;font-size:14px;letter-spacing:-.1px}
+.specimen-code{margin-top:2px;color:#8f9cb8;font-size:11px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-word}
+.case-state{font-size:10px;font-weight:780;border:1px solid #566071;padding:3px 8px;border-radius:99px;white-space:nowrap;color:#c6cbe0}
+.case-state.good{color:#63dfb9;background:#1d51453b;border-color:#347e69}
+.case-state.bad{color:#ff9cae;background:#a83d5a25;border-color:#783c53}
+.case-state.off{color:#d6c094;background:#e8ad5e12}
+.stage{height:196px;display:flex;align-items:center;justify-content:center;margin:13px 13px 13px;border:1px dashed #3d4864;border-radius:12px;background:radial-gradient(circle at top,#263153,#10172b 78%);padding:12px;position:relative;overflow:hidden}
+.stage.large{height:228px}
+.stage:after{content:"TEST AREA";position:absolute;left:10px;bottom:6px;letter-spacing:1px;color:#64718a;font:800 9px/1 ui-monospace,monospace;pointer-events:none}
+.creative{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:6px;border-radius:13px;color:white;padding:13px;box-shadow:0 10px 30px #0003;max-width:100%;position:relative}
+.creative strong{font-size:17px;line-height:1.25;letter-spacing:-.4px}
+.creative span{font-size:11px;opacity:.83}
+.creative em{font-size:10px;opacity:.85;font-style:normal;border:1px solid #ffffff56;padding:3px 8px;border-radius:6px}
+.creative.purple{background:linear-gradient(135deg,#763fbd,#b25ef7)}
+.creative.orange{background:linear-gradient(135deg,#ce674b,#f0ac62)}
+.creative.blue{background:linear-gradient(135deg,#274f93,#4999de)}
+.creative.green{background:linear-gradient(135deg,#0a8d80,#27b8a0)}
+.creative.pink{background:linear-gradient(135deg,#a43270,#e96f93)}
+.creative.rose{background:linear-gradient(135deg,#983f6f,#be69c2)}
+.creative.sky{background:linear-gradient(135deg,#394e83,#5a8ba4)}
+.creative.dark{background:linear-gradient(135deg,#3b3e66,#5f547d)}
+.rect{width:262px;height:155px}
+.tall{width:150px;height:168px}
+.strip{width:100%;min-height:80px}
+.mobile{width:235px;min-height:95px}
+.creative-wide{width:100%;min-height:157px}
+.native{width:100%;background:#f5f1ff;color:#29304a;display:flex;align-items:center;gap:13px;padding:12px;text-align:left;border-radius:11px}
+.native .thumbnail{width:70px;min-width:70px;height:70px;background:linear-gradient(135deg,#bca1eb,#6fbcdd);border-radius:9px;display:grid;place-items:center;font-size:27px}
+.native b{font-size:13px;display:block}
+.native p{font-size:11px;margin:1px 0;color:#626b7f}
+.native small{font-size:10px;font-weight:850;color:#9258cc}
+.product{width:100%;background:#e9f8ff;color:#1c3149;padding:14px;border-radius:12px}
+.product .circle{display:grid;place-items:center;border-radius:50%;background:#89dfe1;width:66px;height:66px;font-size:31px;margin:0 auto 7px}
+.product b{font-size:13px;display:block}
+.product p{font-size:11px;margin:5px 0;color:#426379}
+.videoad{width:100%;height:155px;border-radius:12px;position:relative;overflow:hidden;display:grid;place-items:center;background:linear-gradient(135deg,#262d54,#5b3e83 60%,#9b5e86)}
+.videoad:before{content:"";position:absolute;width:250px;height:250px;border:1px solid #ffffff26;transform:rotate(32deg)}
+.play-circle{z-index:1;width:55px;height:55px;border-radius:50%;display:grid;place-items:center;background:#ffffffea;color:#53428b;font-size:22px}
+.videoad small{position:absolute;left:9px;bottom:10px;font-weight:850;background:#0a1028aa;border-radius:6px;padding:4px 7px;font-size:10px}
+.imgtest{display:block;width:100%;max-height:100px;object-fit:contain}
+#google_ads_iframe_1{width:100%;height:110px;border:0;border-radius:9px;background:#241d41}
+.toolbox{display:flex;flex-wrap:wrap;gap:10px;border:1px solid #303852;background:#181d31;padding:16px;border-radius:15px}
+.results{border:1px solid var(--stroke);border-radius:17px;overflow:hidden;background:#171b30}
+.result-head{display:grid;grid-template-columns:minmax(0,1.4fr) 135px minmax(0,1.6fr);padding:13px 18px;font-size:11px;letter-spacing:.7px;text-transform:uppercase;font-weight:850;color:#aab6ce;background:#20263d;border-bottom:1px solid #303852}
+.result-row{display:grid;grid-template-columns:minmax(0,1.4fr) 135px minmax(0,1.6fr);gap:10px;align-items:center;padding:12px 18px;border-bottom:1px solid #2b314a;font-size:12px;min-height:52px}
+.result-row:last-child{border-bottom:0}
+.result-label{font-weight:730}
+.result-detail{color:#aeb9d1;line-height:1.4}
+.status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:790}
+.status:before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor}
+.status.blocked{color:#58e0b4}
+.status.visible{color:#ffa2a6}
+.status.unknown{color:#ffd48e}
+.status.pending{color:#a8b8d0}
+.status.disabled{color:#a8b8d0}
+.explain{padding:16px 18px;border:1px solid #34415d;border-radius:14px;color:#bbc8dd;background:#20324b50;font-size:12px;margin-top:14px}
+.note{display:flex;align-items:start;gap:12px}
+.note strong{display:block;color:#e3ecff;font-size:13px}
+.note p{margin:4px 0 0}
+.footer{border-top:1px solid #28304b;color:#8d9bb6;padding:25px 0 45px;font-size:12px}
+.footer-inner{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.floating-unit{position:fixed;z-index:60;bottom:15px;right:16px;left:16px;margin-inline:auto;max-width:520px;padding:12px 14px;background:linear-gradient(120deg,#7f4ccb,#473e9c);border:1px solid #cab2ff8a;border-radius:14px;box-shadow:0 15px 50px #090619a8;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.floating-unit strong{font-size:13px}.floating-unit small{font-size:11px;color:#e2d5ff}
+.icon-btn{flex-shrink:0;background:#ffffff24;border:1px solid #ffffff37;border-radius:9px;color:#fff;width:32px;height:32px}
+[hidden]{display:none!important}
+.modal-wrap{position:fixed;inset:0;z-index:90;background:#05060fc7;backdrop-filter:blur(7px);display:grid;place-items:center;padding:18px}
+.modal-card{width:min(440px,100%);padding:24px;background:linear-gradient(135deg,#34316b,#26264d);border:1px solid #a895ff8a;border-radius:23px;box-shadow:0 20px 90px #03010f}
+.modal-card h3{font-size:26px;margin:12px 0 9px}.modal-card p{color:#c9c8e7;margin:0 0 22px}
+.modal-icon{font-size:36px}
+.empty{padding:15px;color:#bac5d9}
+@media(max-width:920px){.formats{grid-template-columns:repeat(2,minmax(0,1fr))}.hero{padding-top:48px}.stats{gap:9px}.stat{padding:15px}}
+@media(max-width:650px){.wrap{width:min(100% - 24px,1180px)}.top-inner{min-height:61px}.brand small{display:none}nav{gap:12px;font-size:11px}nav a:first-child{display:none}h1{letter-spacing:-1.5px}.hero{padding-top:42px}.lead{font-size:15px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.formats{grid-template-columns:1fr}.section-head{align-items:start}.section-tag{display:none}.result-head{display:none}.result-row{grid-template-columns:1fr auto;gap:4px;padding:12px}.result-detail{grid-column:1/-1;font-size:11px}.btn{flex-grow:1;padding:12px 10px}.stage{height:180px}.floating-unit{bottom:9px;left:9px;right:9px}.footer-inner{display:block}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap top-inner">
+  <a class="brand" href="#top"><span class="symbol">✳</span> AdBlock Lab <small>SAFE ZONE</small></a>
+  <nav><a href="#overview">Обзор</a><a href="#formats">Форматы</a><a href="#network">Сеть</a><a href="#results">Результаты</a></nav>
+</div></header>
+<main class="wrap" id="top">
+<section class="hero">
+ <span class="eyebrow"><span class="dot"></span> Безопасный тестовый полигон</span>
+ <h1>Реклама понарошку.<br><span>Проверка по-настоящему.</span></h1>
+ <p class="lead">Проверь, как твой блокировщик справляется с баннерами, рекламными блоками, iframe, всплывающими окнами и типичными URL рекламных скриптов. Ни одного настоящего рекламодателя и никакого слежения.</p>
+ <div class="hintline">🛡️ Всё локальное для этого сайта · без cookies, внешних рекламных сетей и сбора статистики</div>
+ <div class="actions"><button class="btn btn-primary" id="scanTop">↻ &nbsp;Запустить проверку</button><a class="btn" href="#formats">Посмотреть форматы ↓</a><a class="btn" href="#results">Таблица результатов ↗</a></div>
+</section>
+<section id="overview">
+ <div class="section-head"><div><h2>Диагностика</h2><p>Автоматическое обнаружение скрытых элементов и заблокированных загрузок</p></div><span class="section-tag" id="lastScan">ГОТОВО К ПРОВЕРКЕ</span></div>
+ <div class="stats">
+  <div class="stat"><div class="stat-label">◫ Всего тестов</div><div class="stat-value" id="statTotal">—</div></div>
+  <div class="stat"><div class="stat-label">✓ Скрыто / блокировано</div><div class="stat-value" id="statBlocked">—</div></div>
+  <div class="stat"><div class="stat-label">◉ Видно / загружено</div><div class="stat-value" id="statVisible">—</div></div>
+  <div class="stat"><div class="stat-label">◇ Не определено</div><div class="stat-value" id="statUnknown">—</div></div>
+ </div>
+ <div class="meter" title="Результаты сканирования"><div id="bar-blocked"></div><div id="bar-visible"></div></div>
+</section>
+<section id="formats">
+ <div class="section-head"><div><h2>01. Косметические фильтры</h2><p>Разметка и классы, на которые часто реагируют блокировщики</p></div><span class="section-tag">DOM / CSS</span></div>
+ <div class="formats">
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">AdSense-подобный блок</div><div class="specimen-code">.adsbygoogle</div></div><span class="case-state" data-state-for="adsense">Ожидание</span></div><div class="stage"><div data-probe="adsense" class="creative purple rect adsbygoogle"><em>РЕКЛАМА · DEMO</em><strong>Большие скидки! ✦</strong><span>300 × 250 · безопасный макет</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Горизонтальный баннер</div><div class="specimen-code">.ad-banner</div></div><span class="case-state" data-state-for="banner">Ожидание</span></div><div class="stage"><div data-probe="banner" class="creative orange strip ad-banner"><strong>СУПЕР ПРЕДЛОЖЕНИЕ</strong><span>728 × 90 · текстовый макет</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Рекламный слот</div><div class="specimen-code">.ad-slot</div></div><span class="case-state" data-state-for="slot">Ожидание</span></div><div class="stage"><div data-probe="slot" class="creative green tall ad-slot"><em>ПРОМО</em><strong>Скидка 42%</strong><span>Skyscraper · demo</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Advertisement</div><div class="specimen-code">.advertisement</div></div><span class="case-state" data-state-for="advertisement">Ожидание</span></div><div class="stage"><div data-probe="advertisement" class="creative blue rect advertisement"><em>ADVERTISMENT</em><strong>Только сегодня</strong><span>Прямоугольный формат</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Классический adbox</div><div class="specimen-code">.adbox</div></div><span class="case-state" data-state-for="adbox">Ожидание</span></div><div class="stage"><div data-probe="adbox" class="creative rose mobile adbox"><strong>✨ Космический кофе</strong><span>Небывалый аромат. Ненастоящий бренд.</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Рекламный контейнер</div><div class="specimen-code">.ad-container</div></div><span class="case-state" data-state-for="container">Ожидание</span></div><div class="stage"><div data-probe="container" class="creative pink rect ad-container"><em>SPONSORED</em><strong>Электро-облака</strong><span>Выдуманный рекламный продукт</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Нативная реклама</div><div class="specimen-code">.native-ad</div></div><span class="case-state" data-state-for="native">Ожидание</span></div><div class="stage"><div class="native native-ad" data-probe="native"><div class="thumbnail">🌌</div><div><small>РЕКЛАМА</small><b>Как отправиться на Марс?</b><p>Учебный макет рекламной заметки</p></div></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Партнёрская карточка</div><div class="specimen-code">.sponsored</div></div><span class="case-state" data-state-for="sponsored">Ожидание</span></div><div class="stage"><div class="product sponsored" data-probe="sponsored"><div class="circle">🎧</div><b>Наушники «Тишина 3000»</b><p>Партнёрский товар · выдуманный</p></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Спонсируемая вставка</div><div class="specimen-code">.sponsored-content</div></div><span class="case-state" data-state-for="content">Ожидание</span></div><div class="stage"><div class="creative dark strip sponsored-content" data-probe="content"><strong>На правах рекламы</strong><span>Встроено между публикациями</span></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Видеореклама</div><div class="specimen-code">.video-ad</div></div><span class="case-state" data-state-for="video">Ожидание</span></div><div class="stage"><div data-probe="video" class="videoad video-ad"><div class="play-circle">▶</div><small>РЕКЛАМА · 0:15 · ДЕМО</small></div></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Рекламный iframe</div><div class="specimen-code">#google_ads_iframe_1</div></div><span class="case-state" data-state-for="iframe">Ожидание</span></div><div class="stage"><iframe id="google_ads_iframe_1" data-probe="iframe" title="Локальный безопасный рекламный iframe" loading="eager" src="ads/frame.html"></iframe></div></article>
+  <article class="specimen"><div class="specimen-top"><div><div class="specimen-title">Баннер-изображение</div><div class="specimen-code">.banner-ad + /ads/banner.svg</div></div><span class="case-state" data-state-for="image">Ожидание</span></div><div class="stage"><img data-probe="image" class="imgtest banner-ad" alt="Безопасный тестовый рекламный баннер" src="ads/banner.svg"></div></article>
+ </div>
+</section>
+<section id="network">
+ <div class="section-head"><div><h2>02. Проверка сетевых запросов</h2><p>Настоящие загрузки безопасных файлов — без сторонних доменов</p></div><span class="section-tag">HTTP / RESOURCE</span></div>
+ <div class="toolbox">
+  <button class="btn btn-primary" id="scanNet">↻ Перепроверить запросы</button>
+  <button class="btn" id="showPopup">↗ Проверить pop-up</button>
+  <button class="btn" id="showModal">▣ Показать interstitial</button>
+  <button class="btn" id="toggleSticky">⊟ Скрыть нижний баннер</button>
+  <button class="btn" id="rotate">⟳ Обновить макеты</button>
+ </div>
+ <div class="explain note"><span style="font-size:20px">ⓘ</span><div><strong>Как читать сетевые результаты</strong><p>Зелёный означает, что загрузка могла быть заблокирована фильтром. Ошибка сети, 404, CSP или ограничения браузера способны выглядеть так же, поэтому это <b>вероятная</b>, а не доказанная блокировка. Сначала убедись, что контрольный файл загружается. Запросы идут только к этому сайту.</p></div></div>
+</section>
+<section id="results">
+ <div class="section-head"><div><h2>03. Отчёт по тестам</h2><p id="summaryText">Запускаем безопасные проверки…</p></div><span class="section-tag">LIVE REPORT</span></div>
+ <div class="results"><div class="result-head"><span>Проверка</span><span>Результат</span><span>Подробности</span></div><div id="report" aria-live="polite"><div class="empty">Загружаем диагностику…</div></div></div>
+ <div class="explain">💡 Если все макеты видны, проверь, включён ли блокировщик на этом сайте. Здесь нет настоящих объявлений: цель — протестировать правила, а не показывать коммерческую рекламу. Локальные пути не доказывают, что расширение блокирует реальные сторонние рекламные домены.</div>
+</section>
+</main>
+<div class="ad-sticky floating-unit" data-probe="sticky" id="floating" role="complementary" aria-label="Тестовый закреплённый рекламный баннер"><div><strong>🚀 Реклама внизу экрана</strong><br><small>Липкий безопасный макет — закрой или скрой фильтром</small></div><button class="icon-btn" id="closeSticky" title="Закрыть тестовый баннер" aria-label="Закрыть">✕</button></div>
+<div id="interstitial" class="modal-wrap" hidden role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-card"><div class="modal-icon">🪐</div><span class="eyebrow">Интерактивный тест</span><h3 id="modalTitle">Полноэкранная реклама</h3><p>Это локальный макет interstitial. Он открывается только по твоему нажатию, ничего не загружает и не собирает данные.</p><button id="closeModal" class="btn btn-primary">Закрыть рекламу ✕</button></div></div>
+<footer class="footer"><div class="wrap footer-inner"><span>✳ AdBlock Lab · исключительно безопасные демонстрационные объявления</span><span>Без аналитики · без cookies · без внешних рекламных серверов</span></div></footer>
+<script>
+(function(){
+"use strict";
+var domCases=[
+ ["adsense","AdSense-подобный блок",".adsbygoogle"],
+ ["banner","Горизонтальный баннер",".ad-banner"],
+ ["slot","Рекламный слот",".ad-slot"],
+ ["advertisement","Advertisement",".advertisement"],
+ ["adbox","Классический adbox",".adbox"],
+ ["container","Рекламный контейнер",".ad-container"],
+ ["native","Нативная реклама",".native-ad"],
+ ["sponsored","Партнёрская карточка",".sponsored"],
+ ["content","Спонсируемая вставка",".sponsored-content"],
+ ["video","Видеореклама",".video-ad"],
+ ["iframe","Рекламный iframe","#google_ads_iframe_1"],
+ ["image","Баннер-изображение",".banner-ad"],
+ ["sticky","Липкий нижний баннер",".ad-sticky"]
+];
+var netCases=[
+ ["control","Контрольный SVG","assets/control.svg","img","baseline"],
+ ["bannerAsset","Рекламный SVG","ads/banner.svg","img"],
+ ["advertAsset","Advertisement SVG","ads/advertisement.svg","img"],
+ ["doubleAsset","Путь doubleclick/","doubleclick/banner.svg","img"],
+ ["pixel","Путь track/pixel.svg","track/pixel.svg","img"],
+ ["adsScript","Скрипт ads.js","ads.js","script"],
+ ["prebidScript","Скрипт prebid.js","prebid.js","script"],
+ ["analyticsScript","Скрипт analytics.js","analytics.js","script"],
+ ["iframeAsset","HTML рекламного iframe","ads/frame.html","frame"]
+];
+var results={},stickyOn=true,seq=0,scanId=0;
+function el(id){return document.getElementById(id)}
+function setResult(id,label,kind,status,detail){results[id]={id:id,label:label,kind:kind,status:status,detail:detail};}
+function displayBadge(id,status){
+ var badge=document.querySelector('[data-state-for="'+id+'"]');
+ if(!badge)return;
+ var labels={blocked:"СКРЫТ",visible:"ВИДЕН",unknown:"?",pending:"ПРОВЕРКА",disabled:"ВЫКЛ"};
+ badge.textContent=labels[status]||"—";
+ badge.className="case-state "+(status==="blocked"?"good":status==="visible"?"bad":"off");
+}
+function visibleState(node){
+ if(!node || !document.documentElement.contains(node))return ["blocked","Элемент удалён или отсутствует в DOM"];
+ for(var p=node;p&&p.nodeType===1;p=p.parentElement){
+  var s=getComputedStyle(p);
+  if(s.display==="none"||s.visibility==="hidden"||s.visibility==="collapse"||Number(s.opacity)===0)return ["blocked","Скрыт CSS: display / visibility / opacity"];
+ }
+ var r=node.getBoundingClientRect();
+ if(r.width<2||r.height<2)return ["blocked","Нулевой размер элемента"];
+ return ["visible","Виден: "+Math.round(r.width)+" × "+Math.round(r.height)+" px"];
+}
+function scanDom(){
+ domCases.forEach(function(t){
+  var v;
+  if(t[0]==="sticky"&&!stickyOn)v=["disabled","Отключён вручную на странице"];
+  else v=visibleState(document.querySelector('[data-probe="'+t[0]+'"]'));
+  setResult("dom_"+t[0],t[1],"CSS · "+t[2],v[0],v[1]);
+  displayBadge(t[0],v[0]);
+ });
+ render();
+}
+function probeAsset(t){
+ return new Promise(function(resolve){
+  var done=false, node, timer;
+  function finish(ok,detail){if(done)return;done=true;clearTimeout(timer);if(node&&node.parentNode)node.parentNode.removeChild(node);resolve([ok,detail]);}
+  timer=setTimeout(function(){finish(false,"Истекло 6 секунд (тайм-аут)");},6000);
+  try{
+   if(t[3]==="img"){
+    node=new Image();
+    node.onload=function(){finish(true,"Изображение успешно загружено");};
+    node.onerror=function(){finish(false,"Ошибка загрузки изображения");};
+    node.src=t[2]+"?run="+scanId;
+   }else if(t[3]==="script"){
+    node=document.createElement("script");
+    node.async=true;
+    node.onload=function(){finish(true,"Скрипт успешно загружен");};
+    node.onerror=function(){finish(false,"Ошибка загрузки скрипта");};
+    node.src=t[2]+"?run="+scanId;
+    document.head.appendChild(node);
+   }else{
+    fetch(t[2]+"?run="+scanId,{cache:"no-store",credentials:"omit"})
+      .then(function(r){finish(r.ok,r.ok?"HTTP "+r.status:"HTTP "+r.status+" (не загружено)");})
+      .catch(function(){finish(false,"Ошибка fetch / блокировка / сеть");});
+   }
+  }catch(err){finish(false,"Ошибка запроса: "+(err&&err.message||"unknown"));}
+ });
+}
+function render(){
+ var items=[];
+ domCases.forEach(function(t){var r=results["dom_"+t[0]];if(r)items.push(r);});
+ netCases.forEach(function(t){var r=results["net_"+t[0]];if(r)items.push(r);});
+ var counts={blocked:0,visible:0,unknown:0,pending:0,disabled:0};
+ items.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1});
+ var meaningful=counts.blocked+counts.visible+counts.unknown;
+ el("statTotal").textContent=items.length;
+ el("statBlocked").textContent=counts.blocked;
+ el("statVisible").textContent=counts.visible;
+ el("statUnknown").textContent=counts.unknown+counts.pending+counts.disabled;
+ el("bar-blocked").style.width=(meaningful?counts.blocked/meaningful*100:0)+"%";
+ el("bar-visible").style.width=(meaningful?counts.visible/meaningful*100:0)+"%";
+ var total=domCases.length+netCases.length;
+ el("summaryText").textContent=counts.pending?"Проверка сетевых ресурсов…":("Проверено "+(total-counts.pending)+" из "+total+" сценариев");
+ var labels={blocked:"Блок / скрыт",visible:"Виден / OK",unknown:"Неизвестно",pending:"Проверка…",disabled:"Выключен"};
+ var html="";
+ items.forEach(function(r){
+  html+='<div class="result-row"><div><div class="result-label">'+esc(r.label)+'</div><span class="result-detail">'+esc(r.kind)+'</span></div><span class="status '+r.status+'">'+labels[r.status]+'</span><div class="result-detail">'+esc(r.detail)+'</div></div>';
+ });
+ el("report").innerHTML=html;
+}
+function esc(str){return String(str).replace(/[&<>"']/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[ch]})}
+function scanNetwork(){
+ var current=++seq;scanId++;
+ netCases.forEach(function(t){setResult("net_"+t[0],t[1],"HTTP · "+t[2],"pending","Запрос выполняется");});
+ render();
+ return Promise.all(netCases.map(probeAsset)).then(function(out){
+  if(current!==seq)return;
+  var controlOK=out[0][0];
+  netCases.forEach(function(t,i){
+   var ok=out[i][0], detail=out[i][1];
+   var status=t[4]==="baseline"?(ok?"visible":"unknown"):(ok?"visible":(controlOK?"blocked":"unknown"));
+   if(!ok&&t[4]!=="baseline"&&controlOK)detail="Вероятно фильтр (но возможна ошибка сети). "+detail;
+   if(!ok&&!controlOK)detail="Контрольный ресурс недоступен — вывод ненадёжен. "+detail;
+   setResult("net_"+t[0],t[1],"HTTP · "+t[2],status,detail);
+  });
+  el("lastScan").textContent="ПРОВЕРЕНО • "+new Date().toLocaleTimeString("ru-RU");
+  render();
+ });
+}
+function scanAll(){scanDom();scanNetwork();}
+function setSticky(on){
+ stickyOn=on;el("floating").hidden=!on;
+ el("toggleSticky").textContent=on?"⊟ Скрыть нижний баннер":"⊞ Показать нижний баннер";
+ scanDom();
+}
+el("scanTop").addEventListener("click",scanAll);
+el("scanNet").addEventListener("click",scanAll);
+el("toggleSticky").addEventListener("click",function(){setSticky(!stickyOn)});
+el("closeSticky").addEventListener("click",function(){setSticky(false)});
+el("rotate").addEventListener("click",function(){
+ var names=["Космический кофе","Облачные носки","Солнечные батарейки","Лунный лимонад"];
+ var node=document.querySelector('[data-probe="adbox"] strong');
+ if(node)node.textContent="✨ "+names[(++window.__adlabRotation||1)%names.length];
+ scanDom();
+});
+el("showModal").addEventListener("click",function(){el("interstitial").hidden=false;el("closeModal").focus();});
+el("closeModal").addEventListener("click",function(){el("interstitial").hidden=true;el("showModal").focus();});
+el("interstitial").addEventListener("click",function(e){if(e.target===el("interstitial"))el("interstitial").hidden=true;});
+document.addEventListener("keydown",function(e){if(e.key==="Escape"&&!el("interstitial").hidden)el("interstitial").hidden=true;});
+el("showPopup").addEventListener("click",function(){
+ try{
+  var w=window.open("","adlab_demo_popup","width=390,height=280,menubar=no,toolbar=no");
+  if(!w){alert("Всплывающее окно заблокировано браузером или расширением.");return;}
+  w.document.open();w.document.write('<!doctype html><html lang="ru"><meta charset="utf-8"><title>AdLab: pop-up</title><body style="background:#171b30;color:#eef;font:17px system-ui;display:grid;place-content:center;min-height:80vh;text-align:center"><h2>🎉 Тестовый pop-up</h2><p>Без ссылок, рекламы и трекеров.</p><button onclick="window.close()" style="padding:12px;border-radius:10px">Закрыть</button></body></html>');w.document.close();w.focus();
+ }catch(err){alert("Pop-up не открылся. Возможно, он заблокирован.");}
+});
+document.addEventListener("visibilitychange",function(){if(!document.hidden)scanDom();});
+setTimeout(scanAll,250);
+})();
+</script>
+</body>
+</html>
